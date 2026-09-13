@@ -36,10 +36,20 @@ impl Supervisor {
         println!();
         println!("{}", "═══════════════════════════════════════════════════════".green());
         println!("  {} Services are up and running in workspace", "ai-igniter:".bold());
+        println!("  Workspace:       {}", ctx.workspace_path.display());
+        if ctx.root_path != ctx.workspace_path {
+            println!("  Root:            {}", ctx.root_path.display());
+        }
         println!("  Compose project: {}", ctx.compose_project.cyan());
         println!("  Base port:       {}", ctx.base_port.to_string().yellow());
+
+        let images = ctx.service_images();
         for (name, port) in &ctx.port_allocations {
-            println!("  - {:<14} localhost:{}", format!("{}:", name), port);
+            let image_info = images
+                .get(name)
+                .map(|img| format!(" ({img})"))
+                .unwrap_or_default();
+            println!("  - {:<14} localhost:{}{}", format!("{}:", name), port, image_info.dimmed());
         }
         println!();
         println!("  Keeping services alive in foreground.");

@@ -14,9 +14,14 @@ pub fn execute_status(ctx: &WorkspaceContext) -> Result<()> {
     println!("  Config Path:      {}", ctx.config_path.display());
     println!("  Base Port:        {}", ctx.base_port);
     println!();
+    let images = ctx.service_images();
     println!("  Allocated Ports:");
     for (name, port) in &ctx.port_allocations {
-        println!("    - {:<16} : {}", name.bold(), port.to_string().cyan());
+        let image_info = images
+            .get(name)
+            .map(|img| format!(" ({img})"))
+            .unwrap_or_default();
+        println!("    - {:<16} : {}{}", name.bold(), port.to_string().cyan(), image_info.dimmed());
     }
     println!();
 

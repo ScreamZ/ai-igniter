@@ -138,6 +138,25 @@ impl WorkspaceContext {
     pub fn compose_file_path(&self) -> PathBuf {
         self.igniter_dir().join("compose.json")
     }
+
+    /// Image used by each configured and enabled service.
+    pub fn service_images(&self) -> BTreeMap<String, String> {
+        let mut images = BTreeMap::new();
+        if let Some(pg) = &self.config.services.postgres {
+            if pg.enabled {
+                images.insert("postgres".to_string(), pg.image.clone());
+            }
+        }
+        if let Some(garage) = &self.config.services.garage {
+            if garage.enabled {
+                images.insert("garage".to_string(), garage.image.clone());
+            }
+        }
+        for (name, custom) in &self.config.services.custom {
+            images.insert(name.clone(), custom.image.clone());
+        }
+        images
+    }
 }
 
 /// Replaces `{{var}}` and `{{var + N}}` placeholders; returns the unknown expressions on failure.
