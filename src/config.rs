@@ -3,10 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
-pub const CONFIG_FILE_NAME: &str = "ai-igniter.toml";
+use crate::services::all_reserved_names;
+pub use crate::services::garage::GarageConfig;
+pub use crate::services::postgres::PostgresConfig;
+use crate::services::BUILTIN_SERVICES;
 
-/// Names used by built-in port allocations, unavailable to custom services.
-const RESERVED_SERVICE_NAMES: &[&str] = &["base", "postgres", "garage", "garage_web", "redis"];
+pub const CONFIG_FILE_NAME: &str = "ai-igniter.toml";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -43,122 +45,20 @@ pub struct OrchestratorConfig {
 pub struct ServicesConfig {
     pub postgres: Option<PostgresConfig>,
     pub garage: Option<GarageConfig>,
-    pub redis: Option<RedisConfig>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub custom: BTreeMap<String, CustomServiceConfig>,
 }
 
 impl ServicesConfig {
+    #[allow(dead_code)]
     pub fn postgres(&self) -> Option<&PostgresConfig> {
         self.postgres.as_ref().filter(|c| c.enabled)
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn garage(&self) -> Option<&GarageConfig> {
         self.garage.as_ref().filter(|c| c.enabled)
     }
-
-    pub fn redis(&self) -> Option<&RedisConfig> {
-        self.redis.as_ref().filter(|c| c.enabled)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PostgresConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    #[serde(default = "default_pg_offset")]
-    pub port_offset: u16,
-    #[serde(default = "default_pg_image")]
-    pub image: String,
-    pub database: String,
-    pub user: String,
-    pub password: String,
-    pub e2e_database: Option<String>,
-    pub migrate_command: Option<String>,
-    pub seed_command: Option<String>,
-    /// SQL returning a count; the seed is skipped when it is > 0. Without it, the seed runs once per fresh volume.
-    pub seed_check_sql: Option<String>,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_pg_offset() -> u16 {
-    1
-}
-
-fn default_pg_image() -> String {
-    "postgres:16".to_string()
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GarageConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    #[serde(default = "default_garage_offset")]
-    pub port_offset: u16,
-    #[serde(default = "default_garage_web_offset")]
-    pub web_port_offset: u16,
-    #[serde(default = "default_garage_image")]
-    pub image: String,
-    pub access_key: String,
-    pub secret_key: String,
-    pub rpc_secret: Option<String>,
-    #[serde(default)]
-    pub buckets: Vec<String>,
-    #[serde(default)]
-    pub website_buckets: Vec<String>,
-    #[serde(default = "default_web_root_domain")]
-    pub website_root_domain: String,
-}
-
-impl GarageConfig {
-    /// `buckets` followed by website buckets not already listed.
-    pub fn all_buckets(&self) -> Vec<&str> {
-        let mut all: Vec<&str> = Vec::new();
-        for bucket in self.buckets.iter().chain(&self.website_buckets) {
-            if !all.contains(&bucket.as_str()) {
-                all.push(bucket);
-            }
-        }
-        all
-    }
-}
-
-fn default_garage_offset() -> u16 {
-    3
-}
-
-fn default_garage_web_offset() -> u16 {
-    4
-}
-
-fn default_garage_image() -> String {
-    "dxflrs/garage:v2.4.1".to_string()
-}
-
-fn default_web_root_domain() -> String {
-    ".web.localhost".to_string()
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RedisConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    #[serde(default = "default_redis_offset")]
-    pub port_offset: u16,
-    #[serde(default = "default_redis_image")]
-    pub image: String,
-    pub password: Option<String>,
-}
-
-fn default_redis_offset() -> u16 {
-    5
-}
-
-fn default_redis_image() -> String {
-    "redis:7-alpine".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,19 +108,11 @@ impl Config {
 
     /// Host port offsets of enabled services, keyed by allocation name.
     pub fn port_offsets(&self) -> Vec<(String, u16)> {
-        let services = &self.services;
         let mut offsets = Vec::new();
-        if let Some(pg) = services.postgres() {
-            offsets.push(("postgres".to_string(), pg.port_offset));
+        for provider in BUILTIN_SERVICES {
+            offsets.extend(provider.port_offsets(&self.services));
         }
-        if let Some(garage) = services.garage() {
-            offsets.push(("garage".to_string(), garage.port_offset));
-            offsets.push(("garage_web".to_string(), garage.web_port_offset));
-        }
-        if let Some(redis) = services.redis() {
-            offsets.push(("redis".to_string(), redis.port_offset));
-        }
-        for (name, custom) in &services.custom {
+        for (name, custom) in &self.services.custom {
             if let Some(offset) = custom.port_offset {
                 offsets.push((name.clone(), offset));
             }
@@ -233,13 +125,14 @@ impl Config {
             bail!("`name` must contain at least one ASCII letter or digit");
         }
 
+        let reserved = all_reserved_names();
         for (name, custom) in &self.services.custom {
             let valid = name.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
                 && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-');
             if !valid {
                 bail!("Custom service name '{name}' must match [a-z0-9][a-z0-9_-]*");
             }
-            if RESERVED_SERVICE_NAMES.contains(&name.as_str()) {
+            if reserved.contains(&name.as_str()) {
                 bail!("Custom service name '{name}' is reserved");
             }
             if custom.port_offset.is_some() != custom.target_port.is_some() {
@@ -308,7 +201,9 @@ name = "p"
 database = "p"
 user = "p"
 password = "p"
-[services.redis]
+[services.garage]
+access_key = "k"
+secret_key = "s"
 port_offset = 1
 "#,
         );
@@ -321,8 +216,10 @@ port_offset = 1
         let config = parse(
             r#"
 name = "p"
-[services.redis]
+[services.garage]
 enabled = false
+access_key = "k"
+secret_key = "s"
 port_offset = 1
 [services.custom.mail]
 image = "axllent/mailpit"
@@ -335,7 +232,7 @@ target_port = 8025
 
     #[test]
     fn rejects_zero_offset_and_reserved_custom_names() {
-        let zero = parse("name = \"p\"\n[services.redis]\nport_offset = 0");
+        let zero = parse("name = \"p\"\n[services.postgres]\ndatabase = \"p\"\nuser = \"p\"\npassword = \"p\"\nport_offset = 0");
         assert!(zero.validate().is_err());
         let reserved = parse("name = \"p\"\n[services.custom.postgres]\nimage = \"x\"");
         assert!(reserved.validate().is_err());

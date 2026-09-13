@@ -100,72 +100,25 @@ impl WorkspaceContext {
 
     pub fn template_vars(&self) -> BTreeMap<String, String> {
         let mut vars = BTreeMap::new();
-        let mut set = |key: &str, value: String| {
-            vars.insert(key.to_string(), value);
-        };
 
-        set("project.name", self.config.name.clone());
-        set("workspace.slug", self.slug.clone());
-        set("workspace.hash", self.hash.clone());
-        set("workspace.compose_project", self.compose_project.clone());
-        set("workspace.path", self.workspace_path.display().to_string());
-        set("workspace.root", self.root_path.display().to_string());
+        vars.insert("project.name".into(), self.config.name.clone());
+        vars.insert("workspace.slug".into(), self.slug.clone());
+        vars.insert("workspace.hash".into(), self.hash.clone());
+        vars.insert("workspace.compose_project".into(), self.compose_project.clone());
+        vars.insert("workspace.path".into(), self.workspace_path.display().to_string());
+        vars.insert("workspace.root".into(), self.root_path.display().to_string());
 
         for (name, port) in &self.port_allocations {
-            set(&format!("ports.{name}"), port.to_string());
+            vars.insert(format!("ports.{name}"), port.to_string());
         }
 
-        let services = &self.config.services;
-        if let Some(pg) = services.postgres() {
-            let port = self.port_allocations["postgres"];
-            let url = |db: &str| {
-                format!(
-                    "postgresql://{}:{}@127.0.0.1:{port}/{}",
-                    url_encode(&pg.user),
-                    url_encode(&pg.password),
-                    url_encode(db)
-                )
-            };
-            set("services.postgres.port", port.to_string());
-            set("services.postgres.host", "127.0.0.1".to_string());
-            set("services.postgres.user", pg.user.clone());
-            set("services.postgres.password", pg.password.clone());
-            set("services.postgres.database", pg.database.clone());
-            set("services.postgres.url", url(&pg.database));
-            if let Some(e2e) = &pg.e2e_database {
-                set("services.postgres.e2e_database", e2e.clone());
-                set("services.postgres.e2e_url", url(e2e));
-            }
+        for provider in crate::services::BUILTIN_SERVICES {
+            provider.contribute_template_vars(self, &mut vars);
         }
 
-        if let Some(garage) = services.garage() {
-            let port = self.port_allocations["garage"];
-            set("services.garage.port", port.to_string());
-            set("services.garage.web_port", self.port_allocations["garage_web"].to_string());
-            set("services.garage.endpoint", format!("http://localhost:{port}"));
-            set("services.garage.access_key", garage.access_key.clone());
-            set("services.garage.secret_key", garage.secret_key.clone());
-            set("services.garage.region", "garage".to_string());
-            set("services.garage.website_root_domain", garage.website_root_domain.clone());
-        }
-
-        if let Some(redis) = services.redis() {
-            let port = self.port_allocations["redis"];
-            let auth = redis
-                .password
-                .as_deref()
-                .map(|p| format!(":{}@", url_encode(p)))
-                .unwrap_or_default();
-            set("services.redis.port", port.to_string());
-            if let Some(password) = &redis.password {
-                set("services.redis.password", password.clone());
-            }
-            set("services.redis.url", format!("redis://{auth}127.0.0.1:{port}"));
-        }
-
-        for name in services.custom.keys() {
+        for name in self.config.services.custom.keys() {
             if let Some(port) = self.port_allocations.get(name) {
-                set(&format!("services.{name}.port"), port.to_string());
+                vars.insert(format!("services.{name}.port"), port.to_string());
             }
         }
 
@@ -230,7 +183,7 @@ fn eval_expr(expr: &str, vars: &BTreeMap<String, String>) -> Option<String> {
 }
 
 /// Percent-encodes everything but RFC 3986 unreserved characters (for URL userinfo and paths).
-fn url_encode(s: &str) -> String {
+pub(crate) fn url_encode(s: &str) -> String {
     s.bytes()
         .map(|b| {
             if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
@@ -363,7 +316,6 @@ e2e_database = "my-app_e2e"
 [services.garage]
 access_key = "k"
 secret_key = "s"
-[services.redis]
 [services.custom.mail]
 image = "axllent/mailpit"
 port_offset = 8
@@ -373,7 +325,7 @@ target_port = 8025
     #[test]
     fn allocates_ports_from_offsets() {
         let ctx = test_ctx(FULL, Some(4000));
-        let expected = [("base", 4000), ("garage", 4003), ("garage_web", 4004), ("mail", 4008), ("postgres", 4001), ("redis", 4005)];
+        let expected = [("base", 4000), ("garage", 4003), ("garage_web", 4004), ("mail", 4008), ("postgres", 4001)];
         let actual: Vec<(&str, u16)> = ctx.port_allocations.iter().map(|(k, v)| (k.as_str(), *v)).collect();
         assert_eq!(actual, expected);
     }
@@ -405,7 +357,6 @@ target_port = 8025
         assert_eq!(vars["services.postgres.url"], "postgresql://my-app:p%40ss%20word@127.0.0.1:4001/my-app");
         assert_eq!(vars["services.postgres.e2e_url"], "postgresql://my-app:p%40ss%20word@127.0.0.1:4001/my-app_e2e");
         assert_eq!(vars["services.garage.web_port"], "4004");
-        assert_eq!(vars["services.redis.url"], "redis://127.0.0.1:4005");
         assert_eq!(vars["services.mail.port"], "4008");
     }
 
@@ -420,7 +371,7 @@ target_port = 8025
     #[test]
     fn reports_unknown_placeholders() {
         let ctx = test_ctx("name = \"p\"", Some(4000));
-        let err = render_template("{{services.redis.port}}-{{ports.base + 70000}}", &ctx.template_vars()).unwrap_err();
-        assert_eq!(err, ["services.redis.port", "ports.base + 70000"]);
+        let err = render_template("{{services.unknown.port}}-{{ports.base + 70000}}", &ctx.template_vars()).unwrap_err();
+        assert_eq!(err, ["services.unknown.port", "ports.base + 70000"]);
     }
 }

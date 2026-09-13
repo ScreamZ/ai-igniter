@@ -2,7 +2,7 @@
 
 > **Lightning-fast, extensible workspace & service orchestrator for AI worktrees** (Paseo, Conductor, Orca, Cursor, etc.).
 
-`ai-igniter` replaces complex and brittle bash/node scripts with a single, standalone **Rust binary**. It provides complete lifecycle management for parallel git worktrees, isolated Docker services (PostgreSQL, Garage S3, Redis, Custom), and dynamic environment variable synchronization into `.env`.
+`ai-igniter` replaces complex and brittle bash/node scripts with a single, standalone **Rust binary**. It provides complete lifecycle management for parallel git worktrees, isolated Docker services (PostgreSQL, Garage S3, Custom), and dynamic environment variable synchronization into `.env`.
 
 ---
 
@@ -12,7 +12,6 @@
 - 🧩 **Services "À la carte":** Toggle and configure services per project via `ai-igniter.toml`. The Compose file is regenerated on every run, so enabling, disabling or reconfiguring a service takes effect on the next `dev`:
   - **PostgreSQL**: Container with TCP healthcheck, secondary (e2e) database, migrations runner, and a seed that runs once per fresh volume.
   - **Garage S3**: Default key, bucket creation, permissions, website hosting, and S3 CORS configuration without external scripts.
-  - **Redis**: Ready-to-use cache and pub/sub, optional password.
   - **Custom Services**: Any Docker image with ports, environment, command and volumes declared in TOML.
 - 🔄 **Orchestrator Agnostic:** Maps dynamic ports and source checkouts from **Paseo**, **Conductor**, **Orca**, or generic `WORKSPACE_*` variables. Without an orchestrator port, each worktree gets a stable port derived from its path.
 - 🛡️ **Safe Port Reclaiming:** Ports held by another *ai-igniter* project are freed (containers stopped, volumes kept). Containers ai-igniter did not create are never touched.
@@ -52,7 +51,7 @@ ai-igniter init
 The interactive wizard prompts you for:
 - Project name (normalized to lowercase letters, digits, `-` and `_`)
 - Orchestrator (Paseo, Conductor, Orca, Custom)
-- Services to enable (PostgreSQL, Garage S3, Redis)
+- Services to enable (PostgreSQL, Garage S3)
 - If PostgreSQL is selected: migration and seed commands (with defaults, or empty to skip)
 
 This generates `ai-igniter.toml` and adds `.igniter/` to `.gitignore`. Use `--non-interactive` for defaults and `--force` to overwrite an existing file.
@@ -131,12 +130,11 @@ Migration and seed commands run with the same variables in their environment.
 | Placeholder | Meaning |
 | :--- | :--- |
 | `{{ports.base}}` | Workspace base port (app port) |
-| `{{ports.<name>}}`, `{{ports.base + N}}` | Any allocated port (`postgres`, `garage`, `garage_web`, `redis`, custom names), or base + offset |
+| `{{ports.<name>}}`, `{{ports.base + N}}` | Any allocated port (`postgres`, `garage`, `garage_web`, custom names), or base + offset |
 | `{{project.name}}`, `{{workspace.slug}}`, `{{workspace.hash}}`, `{{workspace.compose_project}}`, `{{workspace.path}}`, `{{workspace.root}}` | Workspace identity |
 | `{{services.postgres.url}}` / `e2e_url` | Full connection URLs, credentials URL-encoded |
 | `{{services.postgres.port}}` / `host` / `user` / `password` / `database` / `e2e_database` | Individual PostgreSQL values |
 | `{{services.garage.endpoint}}` / `port` / `web_port` / `access_key` / `secret_key` / `region` / `website_root_domain` | Garage S3 values |
-| `{{services.redis.url}}` / `port` / `password` | Redis values |
 | `{{services.<name>.port}}` | Host port of a custom service declared under `[services.custom.<name>]` |
 
 Unknown placeholders are errors in commands and skipped variables in `.env`.
@@ -193,12 +191,6 @@ buckets = ["my-project-assets"]
 website_buckets = ["my-project-assets"]   # created too if missing from `buckets`
 website_root_domain = ".web.localhost"
 
-[services.redis]
-enabled = false
-port_offset = 5
-image = "redis:7-alpine"
-# password = "secret"
-
 [services.custom.mailpit]
 image = "axllent/mailpit"
 port_offset = 8
@@ -222,7 +214,7 @@ MAIL_UI_URL = "http://localhost:{{services.mailpit.port}}"
 
 Validation rules:
 - Port offsets must be non-zero (0 is the app port) and unique across enabled services.
-- Custom service names match `[a-z0-9][a-z0-9_-]*` and cannot be `base`, `postgres`, `garage`, `garage_web` or `redis`.
+- Custom service names match `[a-z0-9][a-z0-9_-]*` and cannot be `base`, `postgres`, `garage` or `garage_web`.
 - Custom `port_offset` and `target_port` go together.
 
 Values are passed to Docker literally (`$` is escaped). The seed runs once per fresh database volume, tracked with a comment on the database. Set `seed_check_sql` to use your own condition, or `dev --reset` to start over.
@@ -286,11 +278,11 @@ src/
 └── supervisor.rs        # Signal handling & services keep-alive
 ```
 
-To add a service with post-start work (e.g. `Meilisearch`, `LocalStack`):
-1. Add its configuration struct in `src/config.rs` and its offsets in `Config::port_offsets`.
-2. Generate its container in `build_compose` (`src/docker/compose.rs`) and expose its placeholders in `WorkspaceContext::template_vars`.
-3. Implement the `Service` trait in `src/services/<service_name>.rs` and register it in `get_active_services()`.
-
-Services without post-start work (like Redis) only need steps 1 and 2. For one-off containers, prefer `[services.custom.<name>]`.
+To add a new built-in service (e.g. `Redis`, `Meilisearch`, `LocalStack`):
+1. Create `src/services/<service_name>.rs` containing:
+   - Its TOML configuration struct
+   - Its `ServiceProvider` implementation (`prompt_init`, `port_offsets`, `contribute_compose`, `contribute_template_vars`, `post_start`)
+2. Register the provider in `BUILTIN_SERVICES` in [src/services/mod.rs](src/services/mod.rs) and add its optional field in `ServicesConfig`.
+All commands (`init`, `dev`, `env`, etc.) automatically support it without further changes!
 
 Run the tests with `cargo test`.

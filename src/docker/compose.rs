@@ -10,9 +10,6 @@ use std::process::{Command, Output, Stdio};
 /// Label set on every generated container; only containers carrying it are ever reclaimed.
 pub const MANAGED_LABEL: &str = "ai-igniter.managed";
 
-/// Local-only cluster secret for the single-node Garage instance.
-const DEFAULT_GARAGE_RPC_SECRET: &str = "4425f5c26c5e11581d3223904324dcb5b5d5dfb14e5e7f35e38c595424f5f1e6";
-
 pub struct DockerCompose<'a> {
     ctx: &'a WorkspaceContext,
     compose_file: PathBuf,
@@ -32,7 +29,14 @@ impl<'a> DockerCompose<'a> {
         Ok(Self { ctx, compose_file })
     }
 
+    fn ensure_compose_file(&self) {
+        if !self.compose_file.exists() && self.ctx.config.compose_file.is_none() {
+            let _ = write_generated_files(self.ctx);
+        }
+    }
+
     fn command(&self) -> Command {
+        self.ensure_compose_file();
         let mut cmd = Command::new("docker");
         cmd.arg("compose")
             .arg("-p")
@@ -67,8 +71,9 @@ impl<'a> DockerCompose<'a> {
             self.ctx.config.name,
             self.ctx.compose_project.cyan()
         );
-        // --remove-orphans drops containers of services disabled since the last run
-        self.run(&["up", "--detach", "--wait", "--remove-orphans"])
+        // --remove-orphans drops containers of services disabled since the last run;
+        // --force-recreate ensures stale file bind mounts and previous container states are refreshed.
+        self.run(&["up", "--detach", "--wait", "--remove-orphans", "--force-recreate"])
     }
 
     pub fn stop(&self) -> Result<()> {
@@ -180,10 +185,8 @@ fn write_generated_files(ctx: &WorkspaceContext) -> Result<PathBuf> {
     let dir = ctx.igniter_dir();
     fs::create_dir_all(&dir).with_context(|| format!("Failed to create .igniter directory at {:?}", dir))?;
 
-    if let Some(garage) = ctx.config.services.garage() {
-        let path = dir.join("garage.toml");
-        fs::write(&path, garage_toml(&garage.website_root_domain))
-            .with_context(|| format!("Failed to write garage.toml at {:?}", path))?;
+    for provider in crate::services::BUILTIN_SERVICES {
+        provider.write_auxiliary_files(ctx, &dir)?;
     }
 
     let path = ctx.compose_file_path();
@@ -192,113 +195,14 @@ fn write_generated_files(ctx: &WorkspaceContext) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn garage_toml(website_root_domain: &str) -> String {
-    format!(
-        r#"metadata_dir = "/var/lib/garage/meta"
-data_dir = "/var/lib/garage/data"
-db_engine = "sqlite"
-replication_factor = 1
-rpc_bind_addr = "[::]:3901"
-
-[s3_api]
-s3_region = "garage"
-api_bind_addr = "[::]:3900"
-root_domain = ".s3.garage.localhost"
-
-[s3_web]
-bind_addr = "[::]:3902"
-root_domain = {}
-index = "index.html"
-"#,
-        toml::Value::String(website_root_domain.to_string())
-    )
-}
-
 /// Compose document for the enabled services. Compose accepts JSON, which avoids hand-escaping YAML.
 pub fn build_compose(ctx: &WorkspaceContext) -> Value {
     let services_cfg = &ctx.config.services;
-    let port = |name: &str| ctx.port_allocations[name];
     let mut services = Map::new();
     let mut volumes = Map::new();
 
-    if let Some(pg) = services_cfg.postgres() {
-        services.insert(
-            "postgres".into(),
-            json!({
-                "image": pg.image,
-                "environment": {
-                    "POSTGRES_DB": pg.database,
-                    "POSTGRES_USER": pg.user,
-                    "POSTGRES_PASSWORD": pg.password,
-                },
-                // -h forces TCP: the entrypoint's temporary init server only listens on the Unix socket
-                "healthcheck": {
-                    "test": ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", pg.user, "-d", pg.database],
-                    "interval": "2s",
-                    "timeout": "5s",
-                    "retries": 30,
-                },
-                "ports": [format!("{}:5432", port("postgres"))],
-                "volumes": ["postgres-data:/var/lib/postgresql/data"],
-            }),
-        );
-        volumes.insert("postgres-data".into(), json!({}));
-    }
-
-    if let Some(garage) = services_cfg.garage() {
-        let mut environment = json!({
-            "GARAGE_DEFAULT_ACCESS_KEY": garage.access_key,
-            "GARAGE_DEFAULT_SECRET_KEY": garage.secret_key,
-            "GARAGE_RPC_SECRET": garage.rpc_secret.as_deref().unwrap_or(DEFAULT_GARAGE_RPC_SECRET),
-        });
-        let default_flag = match garage.all_buckets().first() {
-            Some(bucket) => {
-                environment["GARAGE_DEFAULT_BUCKET"] = json!(bucket);
-                "--default-bucket"
-            }
-            None => "--default-access-key",
-        };
-        services.insert(
-            "garage".into(),
-            json!({
-                "image": garage.image,
-                "command": ["/garage", "server", "--single-node", default_flag],
-                "environment": environment,
-                "healthcheck": {
-                    "test": ["CMD", "/garage", "status"],
-                    "interval": "2s",
-                    "timeout": "5s",
-                    "retries": 30,
-                },
-                "ports": [format!("{}:3900", port("garage")), format!("{}:3902", port("garage_web"))],
-                "volumes": [
-                    "garage-data:/var/lib/garage/data",
-                    "garage-meta:/var/lib/garage/meta",
-                    format!("{}:/etc/garage.toml:ro", ctx.igniter_dir().join("garage.toml").display()),
-                ],
-            }),
-        );
-        volumes.insert("garage-data".into(), json!({}));
-        volumes.insert("garage-meta".into(), json!({}));
-    }
-
-    if let Some(redis) = services_cfg.redis() {
-        let mut ping = vec!["CMD", "redis-cli"];
-        if let Some(password) = &redis.password {
-            ping.extend(["--no-auth-warning", "-a", password]);
-        }
-        ping.push("ping");
-        let mut service = json!({
-            "image": redis.image,
-            "healthcheck": { "test": ping, "interval": "2s", "timeout": "5s", "retries": 30 },
-            "ports": [format!("{}:6379", port("redis"))],
-            "volumes": ["redis-data:/data"],
-        });
-        if let Some(password) = &redis.password {
-            service["command"] = json!(["redis-server", "--requirepass", password]);
-        }
-        services.insert("redis".into(), service);
-        volumes.insert("redis-data".into(), json!({}));
+    for provider in crate::services::BUILTIN_SERVICES {
+        provider.contribute_compose(ctx, &mut services, &mut volumes);
     }
 
     for (name, custom) in &services_cfg.custom {
@@ -373,8 +277,6 @@ password = "pa$$word"
 [services.garage]
 access_key = "k"
 secret_key = "s"
-[services.redis]
-enabled = false
 [services.custom.mail]
 image = "axllent/mailpit"
 port_offset = 8
