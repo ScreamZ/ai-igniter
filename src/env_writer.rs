@@ -47,7 +47,12 @@ impl EnvWriter {
             && ctx.root_path != ctx.workspace_path
             && let Err(e) = fs::copy(&root_env_path, &env_path)
         {
-            eprintln!("{} Warning: could not copy {:?}: {}", "[env]".yellow().bold(), root_env_path, e);
+            eprintln!(
+                "{} Warning: could not copy {:?}: {}",
+                "[env]".yellow().bold(),
+                root_env_path,
+                e
+            );
         }
 
         let existing_content = match fs::read_to_string(&env_path) {
@@ -63,7 +68,8 @@ impl EnvWriter {
         let tmp_path = ctx.workspace_path.join(".env.ai-igniter.tmp");
         fs::write(&tmp_path, merge_env(&existing_content, &computed))
             .with_context(|| format!("Failed to write {:?}", tmp_path))?;
-        fs::rename(&tmp_path, &env_path).with_context(|| format!("Failed to replace {:?}", env_path))?;
+        fs::rename(&tmp_path, &env_path)
+            .with_context(|| format!("Failed to replace {:?}", env_path))?;
 
         println!(
             "{} Updated environment variables in {}",
@@ -118,7 +124,11 @@ pub fn merge_env(existing: &str, computed: &BTreeMap<String, String>) -> String 
         out.push(String::new());
     }
     out.push(BEGIN_MARKER.to_string());
-    out.extend(computed.iter().map(|(k, v)| format!("{k}={}", quote_env_value(v))));
+    out.extend(
+        computed
+            .iter()
+            .map(|(k, v)| format!("{k}={}", quote_env_value(v))),
+    );
     out.push(END_MARKER.to_string());
 
     if let Some(first) = after.iter().position(|l| !l.trim().is_empty()) {
@@ -154,7 +164,13 @@ pub fn quote_env_value(value: &str) -> String {
     } else if !value.contains('\'') {
         format!("'{value}'")
     } else {
-        format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"").replace('$', "\\$"))
+        format!(
+            "\"{}\"",
+            value
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('$', "\\$")
+        )
     }
 }
 
@@ -163,20 +179,29 @@ mod tests {
     use super::*;
 
     fn computed(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
     }
 
     #[test]
     fn appends_block_to_file_without_one() {
         let out = merge_env("FOO=1\n\n", &computed(&[("DATABASE_URL", "postgres://x")]));
-        assert_eq!(out, format!("FOO=1\n\n{BEGIN_MARKER}\nDATABASE_URL=postgres://x\n{END_MARKER}\n"));
+        assert_eq!(
+            out,
+            format!("FOO=1\n\n{BEGIN_MARKER}\nDATABASE_URL=postgres://x\n{END_MARKER}\n")
+        );
     }
 
     #[test]
     fn replaces_block_in_place_and_keeps_user_lines_after_it() {
         let existing = format!("A=1\n{BEGIN_MARKER}\nOLD=1\n{END_MARKER}\n\nB=2\n");
         let out = merge_env(&existing, &computed(&[("NEW", "2")]));
-        assert_eq!(out, format!("A=1\n\n{BEGIN_MARKER}\nNEW=2\n{END_MARKER}\n\nB=2\n"));
+        assert_eq!(
+            out,
+            format!("A=1\n\n{BEGIN_MARKER}\nNEW=2\n{END_MARKER}\n\nB=2\n")
+        );
     }
 
     #[test]
@@ -190,7 +215,12 @@ mod tests {
     fn drops_managed_keys_defined_outside_the_block() {
         let existing = "export S3_BUCKET=old\nS3_BUCKET = old\n# S3_BUCKET=comment kept\nOTHER=1\n";
         let out = merge_env(existing, &computed(&[("S3_BUCKET", "new")]));
-        assert_eq!(out, format!("# S3_BUCKET=comment kept\nOTHER=1\n\n{BEGIN_MARKER}\nS3_BUCKET=new\n{END_MARKER}\n"));
+        assert_eq!(
+            out,
+            format!(
+                "# S3_BUCKET=comment kept\nOTHER=1\n\n{BEGIN_MARKER}\nS3_BUCKET=new\n{END_MARKER}\n"
+            )
+        );
     }
 
     #[test]
@@ -202,7 +232,10 @@ mod tests {
 
     #[test]
     fn quotes_only_when_needed() {
-        assert_eq!(quote_env_value("postgresql://u:p@127.0.0.1:5432/db"), "postgresql://u:p@127.0.0.1:5432/db");
+        assert_eq!(
+            quote_env_value("postgresql://u:p@127.0.0.1:5432/db"),
+            "postgresql://u:p@127.0.0.1:5432/db"
+        );
         assert_eq!(quote_env_value("a b#c$d"), "'a b#c$d'");
         assert_eq!(quote_env_value("it's \"$x\""), "\"it's \\\"\\$x\\\"\"");
     }

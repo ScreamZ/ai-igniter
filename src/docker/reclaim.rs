@@ -34,7 +34,11 @@ pub fn reclaim_stale_ports(ctx: &WorkspaceContext) {
                     .output()
                     .is_ok_and(|o| o.status.success());
                 if !stopped {
-                    eprintln!("{} Warning: failed to stop project '{}'", "[reclaim]".yellow().bold(), project);
+                    eprintln!(
+                        "{} Warning: failed to stop project '{}'",
+                        "[reclaim]".yellow().bold(),
+                        project
+                    );
                 }
             }
             Action::WarnForeign { container, port } => eprintln!(
@@ -48,7 +52,11 @@ pub fn reclaim_stale_ports(ctx: &WorkspaceContext) {
 }
 
 fn running_containers() -> Option<Vec<Value>> {
-    let ps = Command::new("docker").args(["ps", "-q"]).output().ok().filter(|o| o.status.success())?;
+    let ps = Command::new("docker")
+        .args(["ps", "-q"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
     let ps_stdout = String::from_utf8_lossy(&ps.stdout);
     let ids: Vec<&str> = ps_stdout.split_whitespace().collect();
     if ids.is_empty() {
@@ -73,17 +81,29 @@ fn plan(containers: &[Value], own_project: &str, ports: &BTreeSet<u16>) -> Vec<A
         if !project.is_empty() && project == own_project {
             continue;
         }
-        let Some(port) = host_ports(container).into_iter().find(|p| ports.contains(p)) else {
+        let Some(port) = host_ports(container)
+            .into_iter()
+            .find(|p| ports.contains(p))
+        else {
             continue;
         };
 
         if labels[MANAGED_LABEL] == "true" && !project.is_empty() {
             if stopping.insert(project) {
-                actions.push(Action::StopProject { project: project.to_string(), port });
+                actions.push(Action::StopProject {
+                    project: project.to_string(),
+                    port,
+                });
             }
         } else {
-            let name = container["Name"].as_str().unwrap_or("unknown").trim_start_matches('/');
-            actions.push(Action::WarnForeign { container: name.to_string(), port });
+            let name = container["Name"]
+                .as_str()
+                .unwrap_or("unknown")
+                .trim_start_matches('/');
+            actions.push(Action::WarnForeign {
+                container: name.to_string(),
+                port,
+            });
         }
     }
     actions
@@ -134,9 +154,18 @@ mod tests {
         assert_eq!(
             plan(&containers, "mine", &ports),
             [
-                Action::StopProject { project: "other".into(), port: 4001 },
-                Action::WarnForeign { container: "legacy-db-1".into(), port: 4003 },
-                Action::WarnForeign { container: "my-local-pg".into(), port: 4005 },
+                Action::StopProject {
+                    project: "other".into(),
+                    port: 4001
+                },
+                Action::WarnForeign {
+                    container: "legacy-db-1".into(),
+                    port: 4003
+                },
+                Action::WarnForeign {
+                    container: "my-local-pg".into(),
+                    port: 4005
+                },
             ]
         );
     }

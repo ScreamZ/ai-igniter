@@ -80,7 +80,11 @@ pub struct PostgresConfig {
     pub seed_command: Option<String>,
     /// SQL returning a count; the seed is skipped when it is > 0. Without it, the seed runs once per fresh volume.
     pub seed_check_sql: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_neon_proxy", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_neon_proxy",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub neon_proxy: Option<NeonProxyConfig>,
 }
 
@@ -136,7 +140,11 @@ impl ServiceProvider for PostgresProvider {
         non_interactive: bool,
     ) -> Result<BTreeMap<String, String>> {
         let (migrate_command, seed_command, enable_neon) = if non_interactive {
-            (Some("bun run db:migrate".to_string()), Some("bun run db:seed".to_string()), false)
+            (
+                Some("bun run db:migrate".to_string()),
+                Some("bun run db:seed".to_string()),
+                false,
+            )
         } else {
             let migrate_input = Text::new("PostgreSQL migration command (empty to disable):")
                 .with_initial_value("bun run db:migrate")
@@ -148,7 +156,9 @@ impl ServiceProvider for PostgresProvider {
                 .prompt()?;
             let neon_input = Confirm::new("Enable Neon HTTP proxy (local-neon-http-proxy)?")
                 .with_default(false)
-                .with_help_message("Exposes PostgreSQL over HTTP on port offset 2 for serverless drivers")
+                .with_help_message(
+                    "Exposes PostgreSQL over HTTP on port offset 2 for serverless drivers",
+                )
                 .prompt()?;
             (non_empty(migrate_input), non_empty(seed_input), neon_input)
         };
@@ -175,13 +185,31 @@ impl ServiceProvider for PostgresProvider {
 
         let mut templates = BTreeMap::new();
         if enable_neon {
-            templates.insert("DATABASE_URL".to_string(), "{{services.postgres.neon_url}}".to_string());
-            templates.insert("DATABASE_MIGRATION_URL".to_string(), "{{services.postgres.url}}".to_string());
-            templates.insert("E2E_DATABASE_URL".to_string(), "{{services.postgres.neon_e2e_url}}".to_string());
+            templates.insert(
+                "DATABASE_URL".to_string(),
+                "{{services.postgres.neon_url}}".to_string(),
+            );
+            templates.insert(
+                "DATABASE_MIGRATION_URL".to_string(),
+                "{{services.postgres.url}}".to_string(),
+            );
+            templates.insert(
+                "E2E_DATABASE_URL".to_string(),
+                "{{services.postgres.neon_e2e_url}}".to_string(),
+            );
         } else {
-            templates.insert("DATABASE_URL".to_string(), "{{services.postgres.url}}".to_string());
-            templates.insert("DATABASE_MIGRATION_URL".to_string(), "{{services.postgres.url}}".to_string());
-            templates.insert("E2E_DATABASE_URL".to_string(), "{{services.postgres.e2e_url}}".to_string());
+            templates.insert(
+                "DATABASE_URL".to_string(),
+                "{{services.postgres.url}}".to_string(),
+            );
+            templates.insert(
+                "DATABASE_MIGRATION_URL".to_string(),
+                "{{services.postgres.url}}".to_string(),
+            );
+            templates.insert(
+                "E2E_DATABASE_URL".to_string(),
+                "{{services.postgres.e2e_url}}".to_string(),
+            );
         }
         Ok(templates)
     }
@@ -243,7 +271,11 @@ impl ServiceProvider for PostgresProvider {
         }
     }
 
-    fn contribute_template_vars(&self, ctx: &WorkspaceContext, vars: &mut BTreeMap<String, String>) {
+    fn contribute_template_vars(
+        &self,
+        ctx: &WorkspaceContext,
+        vars: &mut BTreeMap<String, String>,
+    ) {
         if let Some(pg) = ctx.config.services.postgres.as_ref().filter(|c| c.enabled) {
             let port = ctx.port_allocations["postgres"];
             let url = |db: &str| {
@@ -285,10 +317,15 @@ impl ServiceProvider for PostgresProvider {
     }
 
     fn get_active_service<'a>(&self, ctx: &'a WorkspaceContext) -> Option<Box<dyn Service + 'a>> {
-        ctx.config.services.postgres.as_ref().filter(|c| c.enabled).map(|pg| {
-            let s: Box<dyn Service + 'a> = Box::new(PostgresService { config: pg });
-            s
-        })
+        ctx.config
+            .services
+            .postgres
+            .as_ref()
+            .filter(|c| c.enabled)
+            .map(|pg| {
+                let s: Box<dyn Service + 'a> = Box::new(PostgresService { config: pg });
+                s
+            })
     }
 }
 
@@ -309,7 +346,10 @@ impl Service for PostgresService<'_> {
         let env = command_env(ctx);
 
         if let Some(migrate_cmd) = &self.config.migrate_command {
-            println!("{} Running database migrations...", "[postgres]".blue().bold());
+            println!(
+                "{} Running database migrations...",
+                "[postgres]".blue().bold()
+            );
             run_shell(ctx, &ctx.interpolate(migrate_cmd)?, &env).context("Migration failed")?;
         }
 
@@ -325,20 +365,46 @@ impl PostgresService<'_> {
     fn psql(&self, compose: &DockerCompose<'_>, sql: &str) -> Result<String> {
         compose.exec_checked(
             "postgres",
-            &["psql", "-U", &self.config.user, "-d", &self.config.database, "-v", "ON_ERROR_STOP=1", "-tAc", sql],
+            &[
+                "psql",
+                "-U",
+                &self.config.user,
+                "-d",
+                &self.config.database,
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-tAc",
+                sql,
+            ],
         )
     }
 
     fn ensure_database(&self, compose: &DockerCompose<'_>, name: &str) -> Result<()> {
-        let exists = self.psql(compose, &format!("SELECT 1 FROM pg_database WHERE datname = {}", quote_literal(name)))?;
+        let exists = self.psql(
+            compose,
+            &format!(
+                "SELECT 1 FROM pg_database WHERE datname = {}",
+                quote_literal(name)
+            ),
+        )?;
         if exists != "1" {
-            println!("{} Creating secondary database '{}'...", "[postgres]".blue().bold(), name.cyan());
+            println!(
+                "{} Creating secondary database '{}'...",
+                "[postgres]".blue().bold(),
+                name.cyan()
+            );
             self.psql(compose, &format!("CREATE DATABASE {}", quote_ident(name)))?;
         }
         Ok(())
     }
 
-    fn seed(&self, ctx: &WorkspaceContext, compose: &DockerCompose<'_>, seed_cmd: &str, env: &BTreeMap<String, String>) -> Result<()> {
+    fn seed(
+        &self,
+        ctx: &WorkspaceContext,
+        compose: &DockerCompose<'_>,
+        seed_cmd: &str,
+        env: &BTreeMap<String, String>,
+    ) -> Result<()> {
         let already_seeded = match &self.config.seed_check_sql {
             Some(sql) => self
                 .psql(compose, sql)
@@ -355,17 +421,28 @@ impl PostgresService<'_> {
         };
 
         if already_seeded {
-            println!("{} Database already seeded, skipping seed.", "[postgres]".blue().bold());
+            println!(
+                "{} Database already seeded, skipping seed.",
+                "[postgres]".blue().bold()
+            );
             return Ok(());
         }
 
         println!("{} Seeding fresh database...", "[postgres]".blue().bold());
         if let Err(e) = run_shell(ctx, &ctx.interpolate(seed_cmd)?, env) {
-            eprintln!("{} Warning: seed failed, will retry next start: {:#}", "[postgres]".yellow().bold(), e);
+            eprintln!(
+                "{} Warning: seed failed, will retry next start: {:#}",
+                "[postgres]".yellow().bold(),
+                e
+            );
             return Ok(());
         }
 
-        let comment = format!("COMMENT ON DATABASE {} IS {}", quote_ident(&self.config.database), quote_literal(SEED_MARKER));
+        let comment = format!(
+            "COMMENT ON DATABASE {} IS {}",
+            quote_ident(&self.config.database),
+            quote_literal(SEED_MARKER)
+        );
         self.psql(compose, &comment)?;
         Ok(())
     }
@@ -484,4 +561,3 @@ neon_proxy = true
         );
     }
 }
-

@@ -13,7 +13,10 @@ pub fn execute_init(args: InitArgs) -> Result<()> {
 
     if target_file.exists() && !args.force {
         if args.non_interactive {
-            bail!("{} already exists. Use --force to overwrite it.", CONFIG_FILE_NAME);
+            bail!(
+                "{} already exists. Use --force to overwrite it.",
+                CONFIG_FILE_NAME
+            );
         }
         let overwrite = Confirm::new("ai-igniter.toml already exists. Overwrite?")
             .with_default(false)
@@ -42,7 +45,10 @@ pub fn execute_init(args: InitArgs) -> Result<()> {
     // The name doubles as database, user and Compose project name
     let project_name = sanitize_name(&raw_name);
     if project_name.is_empty() {
-        bail!("Project name {:?} must contain at least one ASCII letter or digit", raw_name);
+        bail!(
+            "Project name {:?} must contain at least one ASCII letter or digit",
+            raw_name
+        );
     }
 
     let orchestrator_cfg = if args.non_interactive {
@@ -58,8 +64,7 @@ pub fn execute_init(args: InitArgs) -> Result<()> {
             "Custom (specify environment variable names)",
             "Generic / Fallback (WORKSPACE_*)",
         ];
-        let chosen = Select::new("Select orchestrator:", orchestrator_options)
-            .prompt()?;
+        let chosen = Select::new("Select orchestrator:", orchestrator_options).prompt()?;
 
         match chosen {
             "Paseo" => OrchestratorConfig {
@@ -131,7 +136,8 @@ pub fn execute_init(args: InitArgs) -> Result<()> {
         None
     } else {
         let suggested_dev_cmd = detect_dev_command(&cwd);
-        let mut prompt = Text::new("App dev command to run during 'ai-igniter dev' (leave empty to skip):");
+        let mut prompt =
+            Text::new("App dev command to run during 'ai-igniter dev' (leave empty to skip):");
         if let Some(ref default_cmd) = suggested_dev_cmd {
             prompt = prompt.with_initial_value(default_cmd);
         }
@@ -156,11 +162,16 @@ pub fn execute_init(args: InitArgs) -> Result<()> {
     config.validate()?;
 
     let toml_str = toml::to_string_pretty(&config).context("Failed to serialize config to TOML")?;
-    fs::write(&target_file, toml_str).with_context(|| format!("Failed to write {:?}", target_file))?;
+    fs::write(&target_file, toml_str)
+        .with_context(|| format!("Failed to write {:?}", target_file))?;
     ensure_gitignored(&cwd, ".igniter/")?;
 
     println!();
-    println!("{} Created {}", "✓".green().bold(), target_file.display().to_string().cyan());
+    println!(
+        "{} Created {}",
+        "✓".green().bold(),
+        target_file.display().to_string().cyan()
+    );
     println!("{} You can now run:", "Next steps:".bold());
     println!("  {} {}", "•".cyan(), "ai-igniter dev".bold());
     println!("  {} {}", "•".cyan(), "ai-igniter teardown".bold());
@@ -173,48 +184,53 @@ fn ensure_gitignored(dir: &Path, entry: &str) -> Result<()> {
     let path = dir.join(".gitignore");
     let existing = fs::read_to_string(&path).unwrap_or_default();
     let bare = entry.trim_matches('/');
-    if existing.lines().any(|line| line.trim().trim_matches('/') == bare) {
+    if existing
+        .lines()
+        .any(|line| line.trim().trim_matches('/') == bare)
+    {
         return Ok(());
     }
-    let separator = if existing.is_empty() || existing.ends_with('\n') { "" } else { "\n" };
-    fs::write(&path, format!("{existing}{separator}{entry}\n")).with_context(|| format!("Failed to update {:?}", path))
+    let separator = if existing.is_empty() || existing.ends_with('\n') {
+        ""
+    } else {
+        "\n"
+    };
+    fs::write(&path, format!("{existing}{separator}{entry}\n"))
+        .with_context(|| format!("Failed to update {:?}", path))
 }
 
 /// Inspects package.json or other project manifests to detect a recommended dev command.
 fn detect_dev_command(dir: &Path) -> Option<String> {
     let pkg_json_path = dir.join("package.json");
-    if pkg_json_path.exists() {
-        if let Ok(content) = fs::read_to_string(&pkg_json_path) {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                let scripts = json.get("scripts").and_then(|s| s.as_object());
-                let has_dev = scripts.map_or(false, |s| s.contains_key("dev"));
-                let has_start = scripts.map_or(false, |s| s.contains_key("start"));
+    let content = fs::read_to_string(&pkg_json_path).ok()?;
+    let json = serde_json::from_str::<serde_json::Value>(&content).ok()?;
+    let scripts = json.get("scripts").and_then(|s| s.as_object());
+    let has_dev = scripts.is_some_and(|s| s.contains_key("dev"));
+    let has_start = scripts.is_some_and(|s| s.contains_key("start"));
 
-                let is_bun = dir.join("bun.lock").exists()
-                    || dir.join("bun.lockb").exists()
-                    || which_command_exists("bun");
-                let is_pnpm = dir.join("pnpm-lock.yaml").exists();
-                let is_yarn = dir.join("yarn.lock").exists();
+    let is_bun = dir.join("bun.lock").exists()
+        || dir.join("bun.lockb").exists()
+        || which_command_exists("bun");
+    let is_pnpm = dir.join("pnpm-lock.yaml").exists();
+    let is_yarn = dir.join("yarn.lock").exists();
 
-                let runner = if is_bun {
-                    "bun run"
-                } else if is_pnpm {
-                    "pnpm run"
-                } else if is_yarn {
-                    "yarn"
-                } else {
-                    "npm run"
-                };
+    let runner = if is_bun {
+        "bun run"
+    } else if is_pnpm {
+        "pnpm run"
+    } else if is_yarn {
+        "yarn"
+    } else {
+        "npm run"
+    };
 
-                if has_dev {
-                    return Some(format!("{runner} dev"));
-                } else if has_start {
-                    return Some(format!("{runner} start"));
-                }
-            }
-        }
+    if has_dev {
+        Some(format!("{runner} dev"))
+    } else if has_start {
+        Some(format!("{runner} start"))
+    } else {
+        None
     }
-    None
 }
 
 fn which_command_exists(cmd: &str) -> bool {
@@ -238,13 +254,17 @@ mod tests {
         ensure_gitignored(&dir, ".igniter/").unwrap();
         ensure_gitignored(&dir, ".igniter/").unwrap();
 
-        assert_eq!(fs::read_to_string(dir.join(".gitignore")).unwrap(), "node_modules\n.igniter/\n");
+        assert_eq!(
+            fs::read_to_string(dir.join(".gitignore")).unwrap(),
+            "node_modules\n.igniter/\n"
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn detects_package_json_dev_script() {
-        let dir = std::env::temp_dir().join(format!("ai-igniter-detect-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("ai-igniter-detect-test-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join("package.json"),

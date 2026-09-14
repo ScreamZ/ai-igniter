@@ -71,10 +71,8 @@ pub trait ServiceProvider: Sync {
     fn get_active_service<'a>(&self, ctx: &'a WorkspaceContext) -> Option<Box<dyn Service + 'a>>;
 }
 
-pub static BUILTIN_SERVICES: &[&'static dyn ServiceProvider] = &[
-    &garage::GarageProvider,
-    &postgres::PostgresProvider,
-];
+pub static BUILTIN_SERVICES: &[&'static dyn ServiceProvider] =
+    &[&garage::GarageProvider, &postgres::PostgresProvider];
 
 pub fn get_active_services(ctx: &WorkspaceContext) -> Vec<Box<dyn Service + '_>> {
     let mut active = Vec::new();
@@ -94,7 +92,11 @@ pub fn all_reserved_names() -> Vec<&'static str> {
     names
 }
 
-pub fn run_shell(ctx: &WorkspaceContext, command: &str, env: &BTreeMap<String, String>) -> Result<()> {
+pub fn run_shell(
+    ctx: &WorkspaceContext,
+    command: &str,
+    env: &BTreeMap<String, String>,
+) -> Result<()> {
     let status = Command::new("sh")
         .arg("-c")
         .arg(command)

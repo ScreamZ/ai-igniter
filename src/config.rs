@@ -3,12 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
+use crate::services::BUILTIN_SERVICES;
 use crate::services::all_reserved_names;
 pub use crate::services::garage::GarageConfig;
 #[allow(unused_imports)]
 pub use crate::services::postgres::NeonProxyConfig;
 pub use crate::services::postgres::PostgresConfig;
-use crate::services::BUILTIN_SERVICES;
 
 pub const CONFIG_FILE_NAME: &str = "ai-igniter.toml";
 
@@ -134,7 +134,9 @@ impl Config {
         let reserved = all_reserved_names();
         for (name, custom) in &self.services.custom {
             let valid = name.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
-                && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-');
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-');
             if !valid {
                 bail!("Custom service name '{name}' must match [a-z0-9][a-z0-9_-]*");
             }
@@ -142,7 +144,9 @@ impl Config {
                 bail!("Custom service name '{name}' is reserved");
             }
             if custom.port_offset.is_some() != custom.target_port.is_some() {
-                bail!("Custom service '{name}': `port_offset` and `target_port` must be set together");
+                bail!(
+                    "Custom service '{name}': `port_offset` and `target_port` must be set together"
+                );
             }
         }
 
@@ -150,7 +154,9 @@ impl Config {
         let mut seen: HashMap<u16, &str> = HashMap::new();
         for (name, offset) in &offsets {
             if *offset == 0 {
-                bail!("Service '{name}' has port offset 0, which collides with the base (app) port");
+                bail!(
+                    "Service '{name}' has port offset 0, which collides with the base (app) port"
+                );
             }
             if let Some(other) = seen.insert(*offset, name) {
                 bail!("Services '{other}' and '{name}' share port offset {offset}");
@@ -164,7 +170,13 @@ impl Config {
 pub fn sanitize_name(raw: &str) -> String {
     raw.to_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .trim_matches(|c| c == '-' || c == '_')
         .to_string()
@@ -181,31 +193,52 @@ mod tests {
     #[test]
     fn base_port_is_optional() {
         assert_eq!(parse("name = \"my-project\"").base_port, None);
-        assert_eq!(parse("name = \"my-project\"\nbase_port = 4000").base_port, Some(4000));
+        assert_eq!(
+            parse("name = \"my-project\"\nbase_port = 4000").base_port,
+            Some(4000)
+        );
     }
 
     #[test]
     fn base_port_serialized_only_when_set() {
         let mut config = parse("name = \"my-project\"");
-        assert!(!toml::to_string_pretty(&config).unwrap().contains("base_port"));
+        assert!(
+            !toml::to_string_pretty(&config)
+                .unwrap()
+                .contains("base_port")
+        );
         config.base_port = Some(4500);
-        assert!(toml::to_string_pretty(&config).unwrap().contains("base_port = 4500"));
+        assert!(
+            toml::to_string_pretty(&config)
+                .unwrap()
+                .contains("base_port = 4500")
+        );
     }
 
     #[test]
     fn dev_command_is_optional_and_serializes_when_set() {
         let config = parse("name = \"my-project\"");
         assert_eq!(config.dev_command, None);
-        assert!(!toml::to_string_pretty(&config).unwrap().contains("dev_command"));
+        assert!(
+            !toml::to_string_pretty(&config)
+                .unwrap()
+                .contains("dev_command")
+        );
 
         let with_cmd = parse("name = \"my-project\"\ndev_command = \"bun run dev\"");
         assert_eq!(with_cmd.dev_command.as_deref(), Some("bun run dev"));
-        assert!(toml::to_string_pretty(&with_cmd).unwrap().contains("dev_command = \"bun run dev\""));
+        assert!(
+            toml::to_string_pretty(&with_cmd)
+                .unwrap()
+                .contains("dev_command = \"bun run dev\"")
+        );
     }
 
     #[test]
     fn legacy_workspace_env_is_ignored() {
-        let config = parse("name = \"p\"\n[orchestrator]\nport_env = \"PASEO_PORT\"\nworkspace_env = \"PASEO_WORKTREE_PATH\"");
+        let config = parse(
+            "name = \"p\"\n[orchestrator]\nport_env = \"PASEO_PORT\"\nworkspace_env = \"PASEO_WORKTREE_PATH\"",
+        );
         assert_eq!(config.orchestrator.port_env.as_deref(), Some("PASEO_PORT"));
     }
 
@@ -249,11 +282,14 @@ target_port = 8025
 
     #[test]
     fn rejects_zero_offset_and_reserved_custom_names() {
-        let zero = parse("name = \"p\"\n[services.postgres]\ndatabase = \"p\"\nuser = \"p\"\npassword = \"p\"\nport_offset = 0");
+        let zero = parse(
+            "name = \"p\"\n[services.postgres]\ndatabase = \"p\"\nuser = \"p\"\npassword = \"p\"\nport_offset = 0",
+        );
         assert!(zero.validate().is_err());
         let reserved = parse("name = \"p\"\n[services.custom.postgres]\nimage = \"x\"");
         assert!(reserved.validate().is_err());
-        let half_port = parse("name = \"p\"\n[services.custom.mail]\nimage = \"x\"\nport_offset = 7");
+        let half_port =
+            parse("name = \"p\"\n[services.custom.mail]\nimage = \"x\"\nport_offset = 7");
         assert!(half_port.validate().is_err());
     }
 
@@ -276,7 +312,10 @@ buckets = ["assets", "uploads"]
 website_buckets = ["assets", "site"]
 "#,
         );
-        assert_eq!(config.services.garage().unwrap().all_buckets(), ["assets", "uploads", "site"]);
+        assert_eq!(
+            config.services.garage().unwrap().all_buckets(),
+            ["assets", "uploads", "site"]
+        );
     }
 
     #[test]

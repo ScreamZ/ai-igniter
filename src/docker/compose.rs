@@ -23,7 +23,9 @@ impl<'a> DockerCompose<'a> {
                 .iter()
                 .map(|dir| dir.join(file))
                 .find(|path| path.exists())
-                .with_context(|| format!("compose_file {:?} not found in workspace or root", file))?,
+                .with_context(|| {
+                    format!("compose_file {:?} not found in workspace or root", file)
+                })?,
             None => write_generated_files(ctx)?,
         };
         Ok(Self { ctx, compose_file })
@@ -46,7 +48,10 @@ impl<'a> DockerCompose<'a> {
             .current_dir(&self.ctx.workspace_path);
         // Lets external compose files reference allocated ports, e.g. "${IGNITER_POSTGRES_PORT}:5432"
         for (name, port) in &self.ctx.port_allocations {
-            cmd.env(format!("IGNITER_{}_PORT", name.to_uppercase().replace('-', "_")), port.to_string());
+            cmd.env(
+                format!("IGNITER_{}_PORT", name.to_uppercase().replace('-', "_")),
+                port.to_string(),
+            );
         }
         cmd
     }
@@ -73,7 +78,13 @@ impl<'a> DockerCompose<'a> {
         );
         // --remove-orphans drops containers of services disabled since the last run;
         // --force-recreate ensures stale file bind mounts and previous container states are refreshed.
-        self.run(&["up", "--detach", "--wait", "--remove-orphans", "--force-recreate"])
+        self.run(&[
+            "up",
+            "--detach",
+            "--wait",
+            "--remove-orphans",
+            "--force-recreate",
+        ])
     }
 
     pub fn stop(&self) -> Result<()> {
@@ -90,7 +101,11 @@ impl<'a> DockerCompose<'a> {
             "{} Tearing down services for project '{}' (volumes: {})...",
             "[docker]".blue().bold(),
             self.ctx.compose_project.cyan(),
-            if remove_volumes { "removed".red() } else { "kept".green() }
+            if remove_volumes {
+                "removed".red()
+            } else {
+                "kept".green()
+            }
         );
         let mut args = vec!["down", "--remove-orphans"];
         if remove_volumes {
@@ -105,7 +120,10 @@ impl<'a> DockerCompose<'a> {
 
     /// `down --volumes` only removes volumes declared in the current file, not those of services disabled since.
     fn remove_leftover_volumes(&self) -> Result<()> {
-        let label = format!("label=com.docker.compose.project={}", self.ctx.compose_project);
+        let label = format!(
+            "label=com.docker.compose.project={}",
+            self.ctx.compose_project
+        );
         let output = Command::new("docker")
             .args(["volume", "ls", "-q", "--filter", &label])
             .output()
@@ -141,7 +159,11 @@ impl<'a> DockerCompose<'a> {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
-            bail!("`{}` failed in service '{service}': {}", args.join(" "), format!("{stderr}{stdout}").trim());
+            bail!(
+                "`{}` failed in service '{service}': {}",
+                args.join(" "),
+                format!("{stderr}{stdout}").trim()
+            );
         }
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
@@ -154,7 +176,10 @@ impl<'a> DockerCompose<'a> {
             .output()
             .context("Failed to run `docker compose ps`")?;
         if !output.status.success() {
-            bail!("`docker compose ps` failed: {}", String::from_utf8_lossy(&output.stderr).trim());
+            bail!(
+                "`docker compose ps` failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
         }
         Ok(parse_ps_output(&String::from_utf8_lossy(&output.stdout)))
     }
@@ -183,7 +208,8 @@ fn parse_ps_output(stdout: &str) -> Vec<Value> {
 
 fn write_generated_files(ctx: &WorkspaceContext) -> Result<PathBuf> {
     let dir = ctx.igniter_dir();
-    fs::create_dir_all(&dir).with_context(|| format!("Failed to create .igniter directory at {:?}", dir))?;
+    fs::create_dir_all(&dir)
+        .with_context(|| format!("Failed to create .igniter directory at {:?}", dir))?;
 
     for provider in crate::services::BUILTIN_SERVICES {
         provider.write_auxiliary_files(ctx, &dir)?;
@@ -191,7 +217,8 @@ fn write_generated_files(ctx: &WorkspaceContext) -> Result<PathBuf> {
 
     let path = ctx.compose_file_path();
     let content = serde_json::to_string_pretty(&build_compose(ctx))?;
-    fs::write(&path, content).with_context(|| format!("Failed to write generated compose file at {:?}", path))?;
+    fs::write(&path, content)
+        .with_context(|| format!("Failed to write generated compose file at {:?}", path))?;
     Ok(path)
 }
 
@@ -207,7 +234,9 @@ pub fn build_compose(ctx: &WorkspaceContext) -> Value {
 
     for (name, custom) in &services_cfg.custom {
         let mut service = json!({ "image": custom.image });
-        if let (Some(host_port), Some(target)) = (ctx.port_allocations.get(name), custom.target_port) {
+        if let (Some(host_port), Some(target)) =
+            (ctx.port_allocations.get(name), custom.target_port)
+        {
             service["ports"] = json!([format!("{host_port}:{target}")]);
         }
         if !custom.environment.is_empty() {
@@ -240,7 +269,11 @@ pub fn build_compose(ctx: &WorkspaceContext) -> Value {
 }
 
 /// Relative bind mounts are resolved against the workspace (not `.igniter/`); named volumes get declared.
-fn resolve_volume(ctx: &WorkspaceContext, spec: &str, named_volumes: &mut Map<String, Value>) -> String {
+fn resolve_volume(
+    ctx: &WorkspaceContext,
+    spec: &str,
+    named_volumes: &mut Map<String, Value>,
+) -> String {
     let Some((source, target)) = spec.split_once(':') else {
         return spec.to_string(); // anonymous volume
     };
@@ -317,10 +350,19 @@ neon_proxy = true
 "#;
         let compose = build_compose(&test_ctx(config, Some(4000)));
         let neon = &compose["services"]["neon-proxy"];
-        assert_eq!(neon["image"], "ghcr.io/timowilhelm/local-neon-http-proxy:main");
+        assert_eq!(
+            neon["image"],
+            "ghcr.io/timowilhelm/local-neon-http-proxy:main"
+        );
         assert_eq!(neon["ports"][0], "4002:4444");
-        assert_eq!(neon["environment"]["PG_CONNECTION_STRING"], "postgresql://app:pa%24%24word@postgres:5432/app");
-        assert_eq!(neon["depends_on"]["postgres"]["condition"], "service_healthy");
+        assert_eq!(
+            neon["environment"]["PG_CONNECTION_STRING"],
+            "postgresql://app:pa%24%24word@postgres:5432/app"
+        );
+        assert_eq!(
+            neon["depends_on"]["postgres"]["condition"],
+            "service_healthy"
+        );
         assert_eq!(neon["labels"][MANAGED_LABEL], "true");
     }
 
@@ -328,7 +370,10 @@ neon_proxy = true
     fn garage_without_buckets_only_creates_the_key() {
         let config = "name = \"app\"\n[services.garage]\naccess_key = \"k\"\nsecret_key = \"s\"";
         let compose = build_compose(&test_ctx(config, Some(4000)));
-        assert_eq!(compose["services"]["garage"]["command"][3], "--default-access-key");
+        assert_eq!(
+            compose["services"]["garage"]["command"][3],
+            "--default-access-key"
+        );
         assert!(compose["services"]["garage"]["environment"]["GARAGE_DEFAULT_BUCKET"].is_null());
     }
 
@@ -346,7 +391,8 @@ neon_proxy = true
 
     #[test]
     fn parses_ndjson_and_array_ps_output() {
-        let ndjson = "{\"Service\":\"a\",\"State\":\"running\"}\n{\"Service\":\"b\",\"State\":\"exited\"}\n";
+        let ndjson =
+            "{\"Service\":\"a\",\"State\":\"running\"}\n{\"Service\":\"b\",\"State\":\"exited\"}\n";
         assert_eq!(parse_ps_output(ndjson).len(), 2);
         assert_eq!(parse_ps_output("[{\"Service\":\"a\"}]").len(), 1);
         assert!(parse_ps_output("").is_empty());

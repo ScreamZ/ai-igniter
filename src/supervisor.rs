@@ -39,8 +39,14 @@ impl Supervisor {
         let expected = compose.running_services()?;
 
         println!();
-        println!("{}", "═══════════════════════════════════════════════════════".green());
-        println!("  {} Services are up and running in workspace", "ai-igniter:".bold());
+        println!(
+            "{}",
+            "═══════════════════════════════════════════════════════".green()
+        );
+        println!(
+            "  {} Services are up and running in workspace",
+            "ai-igniter:".bold()
+        );
         println!("  Workspace:       {}", ctx.workspace_path.display());
         if ctx.root_path != ctx.workspace_path {
             println!("  Root:            {}", ctx.root_path.display());
@@ -54,7 +60,12 @@ impl Supervisor {
                 .get(name)
                 .map(|img| format!(" ({img})"))
                 .unwrap_or_default();
-            println!("  - {:<14} localhost:{}{}", format!("{}:", name), port, image_info.dimmed());
+            println!(
+                "  - {:<14} localhost:{}{}",
+                format!("{}:", name),
+                port,
+                image_info.dimmed()
+            );
         }
         println!();
         if let Some(cmd) = dev_command {
@@ -62,8 +73,14 @@ impl Supervisor {
         } else {
             println!("  Keeping services alive in foreground.");
         }
-        println!("  Press {} to gracefully stop all services.", "Ctrl+C".bold());
-        println!("{}", "═══════════════════════════════════════════════════════".green());
+        println!(
+            "  Press {} to gracefully stop all services.",
+            "Ctrl+C".bold()
+        );
+        println!(
+            "{}",
+            "═══════════════════════════════════════════════════════".green()
+        );
         println!();
 
         let mut child = if let Some(cmd) = dev_command {
@@ -97,7 +114,11 @@ impl Supervisor {
                     }
                     Ok(None) => {}
                     Err(e) => {
-                        eprintln!("{} Error checking dev command status: {:#}", "[dev]".yellow().bold(), e);
+                        eprintln!(
+                            "{} Error checking dev command status: {:#}",
+                            "[dev]".yellow().bold(),
+                            e
+                        );
                         break;
                     }
                 }
@@ -109,7 +130,9 @@ impl Supervisor {
             }
             last_check = Instant::now();
             // A transient `docker compose ps` failure is not a service failure
-            let Ok(running) = compose.running_services() else { continue };
+            let Ok(running) = compose.running_services() else {
+                continue;
+            };
             let stopped: Vec<&str> = expected.difference(&running).map(String::as_str).collect();
             if !stopped.is_empty() && !shutdown.requested() {
                 if let Some(ref mut c) = child {
@@ -119,9 +142,8 @@ impl Supervisor {
             }
         }
 
-        if let Some(mut c) = child {
-            if child_exit_status.is_none() {
-                // Terminate child if still running
+        if let (Some(mut c), None) = (child, child_exit_status) {
+            // Terminate child if still running
                 #[cfg(unix)]
                 unsafe {
                     let pid = c.id() as i32;
@@ -146,10 +168,12 @@ impl Supervisor {
 
         if shutdown.requested() {
             println!("\n{} Shutdown signal received.", "[dev]".yellow().bold());
-        } else if let Some(status) = child_exit_status {
-            if !status.success() {
-                println!("\n{} Dev command exited with status: {}", "[dev]".yellow().bold(), status);
-            }
+        } else if let Some(status) = child_exit_status.filter(|s| !s.success()) {
+            println!(
+                "\n{} Dev command exited with status: {}",
+                "[dev]".yellow().bold(),
+                status
+            );
         }
 
         Ok(())

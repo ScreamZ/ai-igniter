@@ -17,7 +17,8 @@ use std::time::Duration;
 const REGION: &str = "garage";
 
 /// Local-only cluster secret for the single-node Garage instance.
-pub const DEFAULT_GARAGE_RPC_SECRET: &str = "4425f5c26c5e11581d3223904324dcb5b5d5dfb14e5e7f35e38c595424f5f1e6";
+pub const DEFAULT_GARAGE_RPC_SECRET: &str =
+    "4425f5c26c5e11581d3223904324dcb5b5d5dfb14e5e7f35e38c595424f5f1e6";
 
 const CORS_XML: &str = r#"<CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
   <CORSRule>
@@ -143,10 +144,22 @@ impl ServiceProvider for GarageProvider {
         });
 
         let mut templates = BTreeMap::new();
-        templates.insert("S3_ENDPOINT".to_string(), "{{services.garage.endpoint}}".to_string());
-        templates.insert("S3_ACCESS_KEY_ID".to_string(), "{{services.garage.access_key}}".to_string());
-        templates.insert("S3_SECRET_ACCESS_KEY".to_string(), "{{services.garage.secret_key}}".to_string());
-        templates.insert("S3_REGION".to_string(), "{{services.garage.region}}".to_string());
+        templates.insert(
+            "S3_ENDPOINT".to_string(),
+            "{{services.garage.endpoint}}".to_string(),
+        );
+        templates.insert(
+            "S3_ACCESS_KEY_ID".to_string(),
+            "{{services.garage.access_key}}".to_string(),
+        );
+        templates.insert(
+            "S3_SECRET_ACCESS_KEY".to_string(),
+            "{{services.garage.secret_key}}".to_string(),
+        );
+        templates.insert(
+            "S3_REGION".to_string(),
+            "{{services.garage.region}}".to_string(),
+        );
         templates.insert("S3_BUCKET".to_string(), final_bucket.clone());
         templates.insert(
             "S3_PUBLIC_URL".to_string(),
@@ -209,24 +222,48 @@ impl ServiceProvider for GarageProvider {
         }
     }
 
-    fn contribute_template_vars(&self, ctx: &WorkspaceContext, vars: &mut BTreeMap<String, String>) {
+    fn contribute_template_vars(
+        &self,
+        ctx: &WorkspaceContext,
+        vars: &mut BTreeMap<String, String>,
+    ) {
         if let Some(garage) = ctx.config.services.garage.as_ref().filter(|c| c.enabled) {
             let port = ctx.port_allocations["garage"];
             vars.insert("services.garage.port".into(), port.to_string());
-            vars.insert("services.garage.web_port".into(), ctx.port_allocations["garage_web"].to_string());
-            vars.insert("services.garage.endpoint".into(), format!("http://localhost:{port}"));
-            vars.insert("services.garage.access_key".into(), garage.access_key.clone());
-            vars.insert("services.garage.secret_key".into(), garage.secret_key.clone());
+            vars.insert(
+                "services.garage.web_port".into(),
+                ctx.port_allocations["garage_web"].to_string(),
+            );
+            vars.insert(
+                "services.garage.endpoint".into(),
+                format!("http://localhost:{port}"),
+            );
+            vars.insert(
+                "services.garage.access_key".into(),
+                garage.access_key.clone(),
+            );
+            vars.insert(
+                "services.garage.secret_key".into(),
+                garage.secret_key.clone(),
+            );
             vars.insert("services.garage.region".into(), "garage".to_string());
-            vars.insert("services.garage.website_root_domain".into(), garage.website_root_domain.clone());
+            vars.insert(
+                "services.garage.website_root_domain".into(),
+                garage.website_root_domain.clone(),
+            );
         }
     }
 
     fn get_active_service<'a>(&self, ctx: &'a WorkspaceContext) -> Option<Box<dyn Service + 'a>> {
-        ctx.config.services.garage.as_ref().filter(|c| c.enabled).map(|g| {
-            let s: Box<dyn Service + 'a> = Box::new(GarageService { config: g });
-            s
-        })
+        ctx.config
+            .services
+            .garage
+            .as_ref()
+            .filter(|c| c.enabled)
+            .map(|g| {
+                let s: Box<dyn Service + 'a> = Box::new(GarageService { config: g });
+                s
+            })
     }
 }
 
@@ -254,27 +291,55 @@ impl Service for GarageService<'_> {
                 Err(err) => {
                     let msg = err.to_string();
                     if msg.contains("NoSuchBucket") || msg.contains("Bucket not found") {
-                        println!("{} Creating bucket '{}'...", "[garage]".blue().bold(), bucket.cyan());
+                        println!(
+                            "{} Creating bucket '{}'...",
+                            "[garage]".blue().bold(),
+                            bucket.cyan()
+                        );
                         garage(&["bucket", "create", bucket])?;
                     } else {
-                        return Err(err).context(format!("Failed to query bucket '{bucket}' in garage"));
+                        return Err(err)
+                            .context(format!("Failed to query bucket '{bucket}' in garage"));
                     }
                 }
             }
-            garage(&["bucket", "allow", bucket, "--read", "--write", "--owner", "--key", &self.config.access_key])?;
+            garage(&[
+                "bucket",
+                "allow",
+                bucket,
+                "--read",
+                "--write",
+                "--owner",
+                "--key",
+                &self.config.access_key,
+            ])?;
         }
 
         // 2. Website hosting
         for bucket in &self.config.website_buckets {
-            println!("{} Enabling website hosting for bucket '{}'...", "[garage]".blue().bold(), bucket.cyan());
+            println!(
+                "{} Enabling website hosting for bucket '{}'...",
+                "[garage]".blue().bold(),
+                bucket.cyan()
+            );
             garage(&["bucket", "website", "--allow", bucket])?;
         }
 
         // 3. CORS via the S3 API (not exposed by the Garage CLI)
         let host = format!("127.0.0.1:{}", ctx.port_allocations["garage"]);
         for bucket in &buckets {
-            if let Err(e) = put_bucket_cors(&host, bucket, &self.config.access_key, &self.config.secret_key) {
-                eprintln!("{} Warning: failed to set CORS on bucket '{}': {:#}", "[garage]".yellow().bold(), bucket, e);
+            if let Err(e) = put_bucket_cors(
+                &host,
+                bucket,
+                &self.config.access_key,
+                &self.config.secret_key,
+            ) {
+                eprintln!(
+                    "{} Warning: failed to set CORS on bucket '{}': {:#}",
+                    "[garage]".yellow().bold(),
+                    bucket,
+                    e
+                );
             }
         }
 
@@ -312,7 +377,13 @@ fn non_empty(input: String) -> Option<String> {
 fn put_bucket_cors(host: &str, bucket: &str, access_key: &str, secret_key: &str) -> Result<()> {
     let amz_date = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
     let uri = format!("/{bucket}");
-    let request = S3Request { method: "PUT", host, uri: &uri, query: "cors=", payload: CORS_XML.as_bytes() };
+    let request = S3Request {
+        method: "PUT",
+        host,
+        uri: &uri,
+        query: "cors=",
+        payload: CORS_XML.as_bytes(),
+    };
     let signed = sign_v4(&request, access_key, secret_key, REGION, &amz_date);
 
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -351,7 +422,13 @@ struct SignedRequest {
 }
 
 /// AWS Signature V4 signing the `host`, `x-amz-content-sha256` and `x-amz-date` headers.
-fn sign_v4(req: &S3Request, access_key: &str, secret_key: &str, region: &str, amz_date: &str) -> SignedRequest {
+fn sign_v4(
+    req: &S3Request,
+    access_key: &str,
+    secret_key: &str,
+    region: &str,
+    amz_date: &str,
+) -> SignedRequest {
     let date_stamp = &amz_date[..8];
     let payload_hash = hex::encode(Sha256::digest(req.payload));
     let signed_headers = "host;x-amz-content-sha256;x-amz-date";

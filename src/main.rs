@@ -33,7 +33,10 @@ fn run(cli: Cli) -> Result<()> {
 
     // If not local execution (e.g. running inside a cloud orchestrator sandbox), skip local Docker services
     if !ctx.is_local {
-        println!("{} Running in non-local environment, skipping local Docker services.", "[info]".blue().bold());
+        println!(
+            "{} Running in non-local environment, skipping local Docker services.",
+            "[info]".blue().bold()
+        );
         return Ok(());
     }
 
