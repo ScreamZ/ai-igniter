@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use crate::services::all_reserved_names;
 pub use crate::services::garage::GarageConfig;
+#[allow(unused_imports)]
+pub use crate::services::postgres::NeonProxyConfig;
 pub use crate::services::postgres::PostgresConfig;
 use crate::services::BUILTIN_SERVICES;
 
@@ -260,5 +262,34 @@ website_buckets = ["assets", "site"]
 "#,
         );
         assert_eq!(config.services.garage().unwrap().all_buckets(), ["assets", "uploads", "site"]);
+    }
+
+    #[test]
+    fn postgres_neon_proxy_reserves_offset_and_names() {
+        let config = parse(
+            r#"
+name = "p"
+[services.postgres]
+database = "p"
+user = "u"
+password = "p"
+neon_proxy = true
+[services.custom.app2]
+image = "myimage"
+port_offset = 2
+target_port = 8080
+"#,
+        );
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("share port offset 2"), "{err}");
+
+        let reserved_name = parse(
+            r#"
+name = "p"
+[services.custom.neon-proxy]
+image = "myimage"
+"#,
+        );
+        assert!(reserved_name.validate().is_err());
     }
 }

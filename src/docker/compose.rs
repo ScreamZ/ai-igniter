@@ -306,6 +306,25 @@ volumes = ["./data/mail:/data", "mail-cache:/cache", "/abs:/abs"]
     }
 
     #[test]
+    fn generates_neon_proxy_service_when_enabled() {
+        let config = r#"
+name = "app"
+[services.postgres]
+database = "app"
+user = "app"
+password = "pa$$word"
+neon_proxy = true
+"#;
+        let compose = build_compose(&test_ctx(config, Some(4000)));
+        let neon = &compose["services"]["neon-proxy"];
+        assert_eq!(neon["image"], "ghcr.io/timowilhelm/local-neon-http-proxy:main");
+        assert_eq!(neon["ports"][0], "4002:4444");
+        assert_eq!(neon["environment"]["PG_CONNECTION_STRING"], "postgresql://app:pa%24%24word@postgres:5432/app");
+        assert_eq!(neon["depends_on"]["postgres"]["condition"], "service_healthy");
+        assert_eq!(neon["labels"][MANAGED_LABEL], "true");
+    }
+
+    #[test]
     fn garage_without_buckets_only_creates_the_key() {
         let config = "name = \"app\"\n[services.garage]\naccess_key = \"k\"\nsecret_key = \"s\"";
         let compose = build_compose(&test_ctx(config, Some(4000)));

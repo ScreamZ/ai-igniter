@@ -380,6 +380,27 @@ target_port = 8025
     }
 
     #[test]
+    fn exposes_neon_proxy_vars_and_ports() {
+        let toml = r#"
+name = "My App"
+[services.postgres]
+database = "my-app"
+user = "my-app"
+password = "p@ss word"
+e2e_database = "my-app_e2e"
+neon_proxy = true
+"#;
+        let ctx = test_ctx(toml, Some(4000));
+        assert_eq!(ctx.port_allocations["postgres"], 4001);
+        assert_eq!(ctx.port_allocations["postgres_neon"], 4002);
+
+        let vars = ctx.template_vars();
+        assert_eq!(vars["services.postgres.neon_port"], "4002");
+        assert_eq!(vars["services.postgres.neon_url"], "postgresql://my-app:p%40ss%20word@127.0.0.1:4002/my-app");
+        assert_eq!(vars["services.postgres.neon_e2e_url"], "postgresql://my-app:p%40ss%20word@127.0.0.1:4002/my-app_e2e");
+    }
+
+    #[test]
     fn renders_placeholders_and_arithmetic() {
         let vars = test_ctx(FULL, Some(4000)).template_vars();
         let rendered = render_template("http://localhost:{{ ports.base + 10 }}/{{project.name}}", &vars).unwrap();
