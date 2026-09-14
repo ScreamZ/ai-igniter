@@ -2,10 +2,87 @@ use crate::context::{WorkspaceContext, format_placeholders, render_template};
 use anyhow::{Context, Result};
 use colored::Colorize;
 use std::collections::BTreeMap;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const BEGIN_MARKER: &str = "# --- Managed by ai-igniter ---";
 pub const END_MARKER: &str = "# --- End Managed by ai-igniter ---";
+
+/// Seeds configured files from the root checkout into a worktree without overwriting local files.
+///
+/// When `copy_files` is absent, the legacy behavior seeds the root `.env` into `env_file`.
+/// An explicit empty `copy_files = []` disables seeding.
+pub fn copy_workspace_files(ctx: &WorkspaceContext) -> Result<()> {
+    if ctx.root_path == ctx.workspace_path {
+        return Ok(());
+    }
+
+    if let Some(rules) = &ctx.config.copy_files {
+        for rule in rules {
+            copy_workspace_file(ctx, &rule.from, &rule.to)?;
+        }
+    } else {
+        copy_workspace_file(ctx, Path::new(".env"), ctx.config.env_file())?;
+    }
+
+    Ok(())
+}
+
+fn copy_workspace_file(ctx: &WorkspaceContext, from: &Path, to: &Path) -> Result<()> {
+    let source = ctx.root_path.join(from);
+    let destination = ctx.workspace_path.join(to);
+
+    // `symlink_metadata` considers a dangling symlink an existing local destination too.
+    match fs::symlink_metadata(&destination) {
+        Ok(_) => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e).with_context(|| format!("Failed to inspect {:?}", destination)),
+    }
+
+    if !source.exists() {
+        eprintln!(
+            "{} Warning: source file {} does not exist; skipping copy to {}",
+            "[env]".yellow().bold(),
+            source.display(),
+            destination.display()
+        );
+        return Ok(());
+    }
+    if !source.is_file() {
+        anyhow::bail!("Configured copy source {:?} is not a file", source);
+    }
+
+    let parent = destination
+        .parent()
+        .expect("workspace-relative destination always has a parent");
+    fs::create_dir_all(parent).with_context(|| format!("Failed to create {:?}", parent))?;
+    let mut input = fs::File::open(&source)
+        .with_context(|| format!("Failed to open configured copy source {:?}", source))?;
+    let mut output = match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&destination)
+    {
+        Ok(file) => file,
+        // Another invocation seeded it after our initial check. Never overwrite it.
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Ok(()),
+        Err(e) => return Err(e).with_context(|| format!("Failed to create {:?}", destination)),
+    };
+    if let Err(e) = io::copy(&mut input, &mut output) {
+        let _ = fs::remove_file(&destination);
+        return Err(e).with_context(|| format!("Failed to copy {:?} to {:?}", source, destination));
+    }
+
+    println!(
+        "{} Seeded {} from {}",
+        "[env]".blue().bold(),
+        destination.display().to_string().cyan(),
+        source.display()
+    );
+    Ok(())
+}
 
 pub struct EnvWriter;
 
@@ -38,22 +115,8 @@ impl EnvWriter {
     }
 
     pub fn write_workspace_env(ctx: &WorkspaceContext) -> Result<()> {
-        let env_path = ctx.workspace_path.join(".env");
-        let root_env_path = ctx.root_path.join(".env");
-
-        // Seed a new worktree with the source checkout's .env
-        if !env_path.exists()
-            && root_env_path.exists()
-            && ctx.root_path != ctx.workspace_path
-            && let Err(e) = fs::copy(&root_env_path, &env_path)
-        {
-            eprintln!(
-                "{} Warning: could not copy {:?}: {}",
-                "[env]".yellow().bold(),
-                root_env_path,
-                e
-            );
-        }
+        copy_workspace_files(ctx)?;
+        let env_path = ctx.workspace_path.join(ctx.config.env_file());
 
         let existing_content = match fs::read_to_string(&env_path) {
             Ok(content) => content,
@@ -64,12 +127,8 @@ impl EnvWriter {
         let (computed, warnings) = Self::compute_env(ctx);
         Self::print_warnings(&warnings);
 
-        // Write to a sibling temp file then rename, so readers never see a partial .env
-        let tmp_path = ctx.workspace_path.join(".env.ai-igniter.tmp");
-        fs::write(&tmp_path, merge_env(&existing_content, &computed))
-            .with_context(|| format!("Failed to write {:?}", tmp_path))?;
-        fs::rename(&tmp_path, &env_path)
-            .with_context(|| format!("Failed to replace {:?}", env_path))?;
+        // Write to a uniquely named sibling, then rename, so readers never see partial content.
+        atomic_write(&env_path, &merge_env(&existing_content, &computed))?;
 
         println!(
             "{} Updated environment variables in {}",
@@ -79,6 +138,60 @@ impl EnvWriter {
 
         Ok(())
     }
+}
+
+fn atomic_write(path: &Path, contents: &str) -> Result<()> {
+    let parent = path
+        .parent()
+        .expect("workspace-relative environment path always has a parent");
+    fs::create_dir_all(parent).with_context(|| format!("Failed to create {:?}", parent))?;
+
+    let filename = path
+        .file_name()
+        .expect("workspace-relative environment path has a filename")
+        .to_string_lossy();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+
+    for attempt in 0..100 {
+        let tmp_path = parent.join(format!(
+            ".{filename}.ai-igniter.{}.{}.{attempt}.tmp",
+            std::process::id(),
+            nanos
+        ));
+        let file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e).with_context(|| format!("Failed to create {:?}", tmp_path)),
+        };
+
+        let write_result = (|| -> Result<()> {
+            let mut file = file;
+            file.write_all(contents.as_bytes())
+                .with_context(|| format!("Failed to write {:?}", tmp_path))?;
+            file.sync_all()
+                .with_context(|| format!("Failed to sync {:?}", tmp_path))?;
+            drop(file);
+            fs::rename(&tmp_path, path).with_context(|| format!("Failed to replace {:?}", path))?;
+            Ok(())
+        })();
+
+        if write_result.is_err() {
+            let _ = fs::remove_file(&tmp_path);
+        }
+        return write_result;
+    }
+
+    anyhow::bail!(
+        "Could not create a unique temporary file next to {:?}",
+        path
+    )
 }
 
 /// Replaces the managed block in `existing` (in place, or appended) and drops managed keys defined elsewhere.
@@ -177,6 +290,45 @@ pub fn quote_env_value(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
+    use std::path::PathBuf;
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new(label: &str) -> Self {
+            let unique = format!(
+                "ai-igniter-{label}-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            );
+            let path = std::env::temp_dir().join(unique);
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn workspace_context(root: PathBuf, workspace: PathBuf, config_toml: &str) -> WorkspaceContext {
+        let config: Config = toml::from_str(config_toml).unwrap();
+        WorkspaceContext::from_parts(
+            workspace,
+            root.clone(),
+            root.join("ai-igniter.toml"),
+            config,
+            Some(4300),
+            true,
+        )
+        .unwrap()
+    }
 
     fn computed(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs
@@ -238,5 +390,96 @@ mod tests {
         );
         assert_eq!(quote_env_value("a b#c$d"), "'a b#c$d'");
         assert_eq!(quote_env_value("it's \"$x\""), "\"it's \\\"\\$x\\\"\"");
+    }
+
+    #[test]
+    fn legacy_seeding_uses_custom_env_file_and_manages_it() {
+        let temp = TestDir::new("legacy-custom-env");
+        let root = temp.0.join("root");
+        let workspace = temp.0.join("worktree");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(root.join(".env"), "USER_SECRET=kept\n").unwrap();
+        let ctx = workspace_context(
+            root,
+            workspace.clone(),
+            r#"
+name = "p"
+env_file = "config/.env.local"
+[env_template]
+MANAGED = "value"
+"#,
+        );
+
+        EnvWriter::write_workspace_env(&ctx).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(workspace.join("config/.env.local")).unwrap(),
+            format!("USER_SECRET=kept\n\n{BEGIN_MARKER}\nMANAGED=value\n{END_MARKER}\n")
+        );
+    }
+
+    #[test]
+    fn copies_mixed_rules_without_overwriting_existing_destinations() {
+        let temp = TestDir::new("mixed-copy");
+        let root = temp.0.join("root");
+        let workspace = temp.0.join("worktree");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(workspace.join("nested")).unwrap();
+        fs::write(root.join(".env"), "ROOT=one\n").unwrap();
+        fs::write(root.join(".env.test"), "TEST=one\n").unwrap();
+        fs::write(workspace.join("nested/.env.local"), "LOCAL=kept\n").unwrap();
+        let ctx = workspace_context(
+            root,
+            workspace.clone(),
+            r#"
+name = "p"
+copy_files = [".env.test", { from = ".env", to = "nested/.env.local" }]
+"#,
+        );
+
+        copy_workspace_files(&ctx).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(workspace.join(".env.test")).unwrap(),
+            "TEST=one\n"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join("nested/.env.local")).unwrap(),
+            "LOCAL=kept\n"
+        );
+    }
+
+    #[test]
+    fn explicit_empty_copy_list_disables_legacy_seeding() {
+        let temp = TestDir::new("empty-copy-list");
+        let root = temp.0.join("root");
+        let workspace = temp.0.join("worktree");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(root.join(".env"), "ROOT=one\n").unwrap();
+        let ctx = workspace_context(root, workspace.clone(), "name = \"p\"\ncopy_files = []");
+
+        copy_workspace_files(&ctx).unwrap();
+
+        assert!(!workspace.join(".env").exists());
+    }
+
+    #[test]
+    fn does_not_copy_when_root_is_the_workspace() {
+        let temp = TestDir::new("local-workspace");
+        fs::write(temp.0.join(".env"), "ROOT=one\n").unwrap();
+        let ctx = workspace_context(
+            temp.0.clone(),
+            temp.0.clone(),
+            "name = \"p\"\ncopy_files = [\".env\"]",
+        );
+
+        copy_workspace_files(&ctx).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(temp.0.join(".env")).unwrap(),
+            "ROOT=one\n"
+        );
     }
 }

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::{Component, Path, PathBuf};
 
 use crate::services::BUILTIN_SERVICES;
 use crate::services::all_reserved_names;
@@ -27,6 +27,15 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dev_command: Option<String>,
 
+    /// File in the workspace which receives the ai-igniter managed environment block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_file: Option<PathBuf>,
+
+    /// Files seeded from the root checkout when a worktree file is absent.
+    /// `None` preserves the legacy `.env` seeding behavior; `Some(vec![])` disables it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy_files: Option<Vec<CopyFileRule>>,
+
     #[serde(default)]
     pub orchestrator: OrchestratorConfig,
 
@@ -35,6 +44,38 @@ pub struct Config {
 
     #[serde(default)]
     pub env_template: BTreeMap<String, String>,
+}
+
+/// A file copied from the root checkout to a worktree on first use.
+///
+/// TOML accepts either `".env"` (same source and destination) or
+/// `{ from = ".env", to = ".env.local" }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CopyFileRule {
+    pub from: PathBuf,
+    pub to: PathBuf,
+}
+
+impl<'de> Deserialize<'de> for CopyFileRule {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Rule {
+            SamePath(PathBuf),
+            Rename { from: PathBuf, to: PathBuf },
+        }
+
+        match Rule::deserialize(deserializer)? {
+            Rule::SamePath(path) => Ok(Self {
+                from: path.clone(),
+                to: path,
+            }),
+            Rule::Rename { from, to } => Ok(Self { from, to }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -81,6 +122,12 @@ pub struct CustomServiceConfig {
 }
 
 impl Config {
+    pub fn env_file(&self) -> &Path {
+        self.env_file
+            .as_deref()
+            .unwrap_or_else(|| Path::new(".env"))
+    }
+
     pub fn load_from_file(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file at {:?}", path))?;
@@ -131,6 +178,21 @@ impl Config {
             bail!("`name` must contain at least one ASCII letter or digit");
         }
 
+        validate_relative_file_path("`env_file`", self.env_file())?;
+        if let Some(copy_files) = &self.copy_files {
+            let mut destinations = HashSet::new();
+            for rule in copy_files {
+                validate_relative_file_path("`copy_files.from`", &rule.from)?;
+                validate_relative_file_path("`copy_files.to`", &rule.to)?;
+                if !destinations.insert(rule.to.clone()) {
+                    bail!(
+                        "`copy_files` contains more than one rule for destination {:?}",
+                        rule.to
+                    );
+                }
+            }
+        }
+
         let reserved = all_reserved_names();
         for (name, custom) in &self.services.custom {
             let valid = name.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
@@ -164,6 +226,24 @@ impl Config {
         }
         Ok(())
     }
+}
+
+fn validate_relative_file_path(field: &str, path: &Path) -> Result<()> {
+    if path.as_os_str().is_empty() {
+        bail!("{field} must not be empty");
+    }
+
+    for component in path.components() {
+        match component {
+            Component::Normal(_) => {}
+            Component::CurDir => bail!("{field} must name a file, not the workspace directory"),
+            Component::ParentDir => bail!("{field} must not contain `..`: {:?}", path),
+            Component::RootDir | Component::Prefix(_) => {
+                bail!("{field} must be relative: {:?}", path)
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Lowercases and replaces characters Docker Compose rejects in project names.
@@ -232,6 +312,89 @@ mod tests {
                 .unwrap()
                 .contains("dev_command = \"bun run dev\"")
         );
+    }
+
+    #[test]
+    fn parses_copy_file_string_syntax() {
+        let config = parse("name = \"p\"\ncopy_files = [\".env\"]");
+        assert_eq!(
+            config.copy_files,
+            Some(vec![CopyFileRule {
+                from: PathBuf::from(".env"),
+                to: PathBuf::from(".env"),
+            }])
+        );
+    }
+
+    #[test]
+    fn parses_copy_file_object_and_mixed_syntax() {
+        let config = parse(
+            r#"
+name = "p"
+copy_files = [".env.test", { from = ".env", to = ".env.local" }]
+"#,
+        );
+        assert_eq!(
+            config.copy_files,
+            Some(vec![
+                CopyFileRule {
+                    from: PathBuf::from(".env.test"),
+                    to: PathBuf::from(".env.test"),
+                },
+                CopyFileRule {
+                    from: PathBuf::from(".env"),
+                    to: PathBuf::from(".env.local"),
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn explicit_empty_copy_list_is_distinct_from_legacy_default() {
+        assert_eq!(parse("name = \"p\"").copy_files, None);
+        assert_eq!(
+            parse("name = \"p\"\ncopy_files = []").copy_files,
+            Some(vec![])
+        );
+    }
+
+    #[test]
+    fn env_file_defaults_and_serializes_when_set() {
+        let config = parse("name = \"p\"");
+        assert_eq!(config.env_file(), Path::new(".env"));
+
+        let config = parse("name = \"p\"\nenv_file = \".env.local\"");
+        assert_eq!(config.env_file(), Path::new(".env.local"));
+        assert!(
+            toml::to_string_pretty(&config)
+                .unwrap()
+                .contains("env_file = \".env.local\"")
+        );
+    }
+
+    #[test]
+    fn rejects_unsafe_file_paths_and_duplicate_destinations() {
+        for setting in [
+            "env_file = \"../outside\"",
+            "env_file = \"/outside\"",
+            "env_file = \"\"",
+            "copy_files = [{ from = \"../outside\", to = \".env\" }]",
+            "copy_files = [{ from = \".env\", to = \"../outside\" }]",
+        ] {
+            let config = parse(&format!("name = \"p\"\n{setting}"));
+            assert!(config.validate().is_err(), "{setting}");
+        }
+
+        let duplicate = parse(
+            r#"
+name = "p"
+copy_files = [
+  ".env.local",
+  { from = ".env", to = ".env.local" },
+]
+"#,
+        );
+        assert!(duplicate.validate().is_err());
     }
 
     #[test]

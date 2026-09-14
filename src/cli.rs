@@ -80,7 +80,7 @@ pub struct DevArgs {
 
 #[derive(Args, Debug)]
 pub struct EnvArgs {
-    /// Write the evaluated variables directly to .env
+    /// Write the evaluated variables to env_file (or .env by default)
     #[arg(short, long)]
     pub write: bool,
 }

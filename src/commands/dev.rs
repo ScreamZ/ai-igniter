@@ -31,7 +31,7 @@ pub fn execute_dev(ctx: &WorkspaceContext, args: &DevArgs) -> Result<()> {
         compose.down(true)?;
     }
 
-    // 3. Write workspace .env
+    // 3. Seed workspace files and write the managed environment file
     EnvWriter::write_workspace_env(ctx)?;
 
     // 4. Start, initialize and supervise; services are stopped whatever the outcome

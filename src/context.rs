@@ -60,6 +60,9 @@ impl WorkspaceContext {
             .or_else(|| env_dir(config.orchestrator.root_env.as_deref()?))
             .or(main_checkout)
             .unwrap_or_else(|| workspace_path.clone());
+        // Compare physical paths when deciding whether a worktree needs seeding. This also
+        // handles `--root .` and symlinked root checkouts when the workspace is canonical.
+        let root_path = std::fs::canonicalize(&root_path).unwrap_or(root_path);
 
         let base_port = resolve_base_port(cli.port, &config)?;
         Self::from_parts(

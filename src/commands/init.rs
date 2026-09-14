@@ -155,6 +155,8 @@ pub fn execute_init(args: InitArgs) -> Result<()> {
         base_port: None,
         compose_file: None,
         dev_command,
+        env_file: None,
+        copy_files: None,
         orchestrator: orchestrator_cfg,
         services,
         env_template,
