@@ -88,12 +88,26 @@ impl<'a> DockerCompose<'a> {
     }
 
     pub fn stop(&self) -> Result<()> {
-        println!(
-            "{} Stopping services for project '{}'...",
-            "[docker]".blue().bold(),
-            self.ctx.compose_project.cyan()
+        let _ = std::io::Write::write_fmt(
+            &mut std::io::stdout(),
+            format_args!(
+                "{} Stopping services for project '{}'...\n",
+                "[docker]".blue().bold(),
+                self.ctx.compose_project.cyan()
+            ),
         );
-        self.run(&["stop"])
+        let status = self
+            .command()
+            .args(["stop"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .with_context(|| "Failed to run `docker compose stop`")?;
+        if !status.success() {
+            bail!("`docker compose stop` exited with {status}");
+        }
+        Ok(())
     }
 
     pub fn down(&self, remove_volumes: bool) -> Result<()> {

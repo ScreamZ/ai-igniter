@@ -7,6 +7,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use std::io::Write;
+
+/// Silently ignores write errors to avoid panics (e.g. EIO when the terminal is closed / SIGHUP),
+/// ensuring cleanup and docker teardown can run to completion.
+macro_rules! safe_println {
+    () => {
+        let _ = writeln!(std::io::stdout());
+    };
+    ($($arg:tt)*) => {
+        let _ = writeln!(std::io::stdout(), $($arg)*);
+    };
+}
+
 const HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Set on SIGINT / SIGTERM / SIGHUP. Installed before any Docker work so an interrupt always stops the services.
@@ -38,21 +51,21 @@ impl Supervisor {
     ) -> Result<()> {
         let expected = compose.running_services()?;
 
-        println!();
-        println!(
+        safe_println!();
+        safe_println!(
             "{}",
             "═══════════════════════════════════════════════════════".green()
         );
-        println!(
+        safe_println!(
             "  {} Services are up and running in workspace",
             "ai-igniter:".bold()
         );
-        println!("  Workspace:       {}", ctx.workspace_path.display());
+        safe_println!("  Workspace:       {}", ctx.workspace_path.display());
         if ctx.root_path != ctx.workspace_path {
-            println!("  Root:            {}", ctx.root_path.display());
+            safe_println!("  Root:            {}", ctx.root_path.display());
         }
-        println!("  Compose project: {}", ctx.compose_project.cyan());
-        println!("  Base port:       {}", ctx.base_port.to_string().yellow());
+        safe_println!("  Compose project: {}", ctx.compose_project.cyan());
+        safe_println!("  Base port:       {}", ctx.base_port.to_string().yellow());
 
         let images = ctx.service_images();
         for (name, port) in &ctx.port_allocations {
@@ -60,28 +73,28 @@ impl Supervisor {
                 .get(name)
                 .map(|img| format!(" ({img})"))
                 .unwrap_or_default();
-            println!(
+            safe_println!(
                 "  - {:<14} localhost:{}{}",
                 format!("{}:", name),
                 port,
                 image_info.dimmed()
             );
         }
-        println!();
+        safe_println!();
         if let Some(cmd) = dev_command {
-            println!("  Executing dev command: {}", cmd.cyan().bold());
+            safe_println!("  Executing dev command: {}", cmd.cyan().bold());
         } else {
-            println!("  Keeping services alive in foreground.");
+            safe_println!("  Keeping services alive in foreground.");
         }
-        println!(
+        safe_println!(
             "  Press {} to gracefully stop all services.",
             "Ctrl+C".bold()
         );
-        println!(
+        safe_println!(
             "{}",
             "═══════════════════════════════════════════════════════".green()
         );
-        println!();
+        safe_println!();
 
         let mut child = if let Some(cmd) = dev_command {
             let mut command = if cfg!(windows) {
@@ -166,9 +179,9 @@ impl Supervisor {
         }
 
         if shutdown.requested() {
-            println!("\n{} Shutdown signal received.", "[dev]".yellow().bold());
+            safe_println!("\n{} Shutdown signal received.", "[dev]".yellow().bold());
         } else if let Some(status) = child_exit_status.filter(|s| !s.success()) {
-            println!(
+            safe_println!(
                 "\n{} Dev command exited with status: {}",
                 "[dev]".yellow().bold(),
                 status
