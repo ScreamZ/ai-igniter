@@ -144,25 +144,24 @@ impl Supervisor {
 
         if let (Some(mut c), None) = (child, child_exit_status) {
             // Terminate child if still running
-                #[cfg(unix)]
-                unsafe {
-                    let pid = c.id() as i32;
-                    libc_kill(pid, 15); // SIGTERM
+            #[cfg(unix)]
+            unsafe {
+                let pid = c.id() as i32;
+                libc_kill(pid, 15); // SIGTERM
+            }
+            // Wait briefly for graceful exit, otherwise kill
+            let grace_start = Instant::now();
+            let mut terminated = false;
+            while grace_start.elapsed() < Duration::from_millis(1500) {
+                if let Ok(Some(_)) = c.try_wait() {
+                    terminated = true;
+                    break;
                 }
-                // Wait briefly for graceful exit, otherwise kill
-                let grace_start = Instant::now();
-                let mut terminated = false;
-                while grace_start.elapsed() < Duration::from_millis(1500) {
-                    if let Ok(Some(_)) = c.try_wait() {
-                        terminated = true;
-                        break;
-                    }
-                    thread::sleep(Duration::from_millis(100));
-                }
-                if !terminated {
-                    let _ = c.kill();
-                    let _ = c.wait();
-                }
+                thread::sleep(Duration::from_millis(100));
+            }
+            if !terminated {
+                let _ = c.kill();
+                let _ = c.wait();
             }
         }
 

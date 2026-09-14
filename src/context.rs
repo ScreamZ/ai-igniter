@@ -168,7 +168,13 @@ impl WorkspaceContext {
     /// Image used by each configured and enabled service.
     pub fn service_images(&self) -> BTreeMap<String, String> {
         let mut images = BTreeMap::new();
-        if let Some(pg) = self.config.services.postgres.as_ref().filter(|pg| pg.enabled) {
+        if let Some(pg) = self
+            .config
+            .services
+            .postgres
+            .as_ref()
+            .filter(|pg| pg.enabled)
+        {
             images.insert("postgres".to_string(), pg.image.clone());
         }
         if let Some(garage) = self.config.services.garage.as_ref().filter(|g| g.enabled) {
