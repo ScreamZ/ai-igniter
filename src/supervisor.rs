@@ -1,7 +1,9 @@
 use crate::context::WorkspaceContext;
 use crate::docker::DockerCompose;
+use crate::env_writer::EnvWriter;
 use anyhow::{Context, Result, bail};
 use colored::Colorize;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -80,8 +82,12 @@ impl Supervisor {
                 image_info.dimmed()
             );
         }
+        let interpolated_cmd = dev_command
+            .map(|cmd| ctx.interpolate(cmd))
+            .transpose()?;
+
         safe_println!();
-        if let Some(cmd) = dev_command {
+        if let Some(cmd) = &interpolated_cmd {
             safe_println!("  Executing dev command: {}", cmd.cyan().bold());
         } else {
             safe_println!("  Keeping services alive in foreground.");
@@ -96,17 +102,8 @@ impl Supervisor {
         );
         safe_println!();
 
-        let mut child = if let Some(cmd) = dev_command {
-            let mut command = if cfg!(windows) {
-                let mut c = std::process::Command::new("cmd");
-                c.args(["/C", cmd]);
-                c
-            } else {
-                let mut c = std::process::Command::new("sh");
-                c.args(["-c", cmd]);
-                c
-            };
-            command.current_dir(&ctx.workspace_path);
+        let mut child = if let Some(ref cmd) = interpolated_cmd {
+            let mut command = create_dev_command(ctx, cmd)?;
             let spawned = command
                 .spawn()
                 .with_context(|| format!("Failed to spawn dev command: '{cmd}'"))?;
@@ -192,6 +189,39 @@ impl Supervisor {
     }
 }
 
+/// Returns the environment variables to provide to the dev command:
+/// computed from `[env_template]`, with `PORT` and PostgreSQL variables as fallbacks.
+pub fn dev_env(ctx: &WorkspaceContext) -> BTreeMap<String, String> {
+    let (mut env, _warnings) = EnvWriter::compute_env(ctx);
+    env.entry("PORT".to_string())
+        .or_insert_with(|| ctx.base_port.to_string());
+    if let Some(url) = ctx.template_vars().remove("services.postgres.url") {
+        for key in ["DATABASE_URL", "DATABASE_MIGRATION_URL"] {
+            env.entry(key.to_string()).or_insert_with(|| url.clone());
+        }
+    }
+    env
+}
+
+pub fn create_dev_command(
+    ctx: &WorkspaceContext,
+    cmd: &str,
+) -> Result<std::process::Command> {
+    let interpolated = ctx.interpolate(cmd)?;
+    let mut command = if cfg!(windows) {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", &interpolated]);
+        c
+    } else {
+        let mut c = std::process::Command::new("sh");
+        c.args(["-c", &interpolated]);
+        c
+    };
+    command.current_dir(&ctx.workspace_path);
+    command.envs(dev_env(ctx));
+    Ok(command)
+}
+
 #[cfg(unix)]
 unsafe fn libc_kill(pid: i32, sig: i32) {
     unsafe extern "C" {
@@ -201,3 +231,45 @@ unsafe fn libc_kill(pid: i32, sig: i32) {
         kill(pid, sig);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn dev_command_interpolates_and_injects_env() {
+        let toml = r#"
+name = "test-app"
+[env_template]
+CUSTOM_VAR = "hello-{{project.name}}"
+"#;
+        let ctx = crate::context::tests::test_ctx(toml, Some(4123));
+        let cmd = create_dev_command(&ctx, "bun run dev -- --port {{ports.base}} $PORT").unwrap();
+
+        let args: Vec<&OsStr> = cmd.get_args().collect();
+        if cfg!(windows) {
+            assert_eq!(args, &["/C", "bun run dev -- --port 4123 $PORT"]);
+        } else {
+            assert_eq!(args, &["-c", "bun run dev -- --port 4123 $PORT"]);
+        }
+
+        let envs: std::collections::HashMap<&OsStr, Option<&OsStr>> = cmd.get_envs().collect();
+        assert_eq!(
+            envs.get(OsStr::new("PORT")).and_then(|v| *v),
+            Some(OsStr::new("4123"))
+        );
+        assert_eq!(
+            envs.get(OsStr::new("CUSTOM_VAR")).and_then(|v| *v),
+            Some(OsStr::new("hello-test-app"))
+        );
+    }
+
+    #[test]
+    fn dev_command_fails_on_unknown_placeholder() {
+        let ctx = crate::context::tests::test_ctx("name = \"test-app\"", Some(4123));
+        let result = create_dev_command(&ctx, "bun run dev -- --port {{unknown.var}}");
+        assert!(result.is_err());
+    }
+}
+

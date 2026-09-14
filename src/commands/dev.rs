@@ -43,6 +43,10 @@ pub fn execute_dev(ctx: &WorkspaceContext, args: &DevArgs) -> Result<()> {
         ctx.config.dev_command.clone()
     };
 
+    if let Some(cmd) = &dev_command {
+        ctx.interpolate(cmd)?;
+    }
+
     let result = start_and_supervise(ctx, &compose, &shutdown, dev_command.as_deref());
     if let Err(e) = compose.stop() {
         eprintln!("{} Warning: {:#}", "[dev]".yellow().bold(), e);
