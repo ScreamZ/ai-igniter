@@ -35,7 +35,15 @@ pub fn execute_dev(ctx: &WorkspaceContext, args: &DevArgs) -> Result<()> {
     EnvWriter::write_workspace_env(ctx)?;
 
     // 4. Start, initialize and supervise; services are stopped whatever the outcome
-    let result = start_and_supervise(ctx, &compose, &shutdown);
+    let dev_command = if args.no_command {
+        None
+    } else if !args.command.is_empty() {
+        Some(args.command.join(" "))
+    } else {
+        ctx.config.dev_command.clone()
+    };
+
+    let result = start_and_supervise(ctx, &compose, &shutdown, dev_command.as_deref());
     if let Err(e) = compose.stop() {
         eprintln!("{} Warning: {:#}", "[dev]".yellow().bold(), e);
     }
@@ -44,7 +52,12 @@ pub fn execute_dev(ctx: &WorkspaceContext, args: &DevArgs) -> Result<()> {
     if shutdown.requested() { Ok(()) } else { result }
 }
 
-fn start_and_supervise(ctx: &WorkspaceContext, compose: &DockerCompose<'_>, shutdown: &ShutdownSignal) -> Result<()> {
+fn start_and_supervise(
+    ctx: &WorkspaceContext,
+    compose: &DockerCompose<'_>,
+    shutdown: &ShutdownSignal,
+    dev_command: Option<&str>,
+) -> Result<()> {
     compose.up()?;
 
     for service in get_active_services(ctx) {
@@ -59,5 +72,5 @@ fn start_and_supervise(ctx: &WorkspaceContext, compose: &DockerCompose<'_>, shut
     if shutdown.requested() {
         return Ok(());
     }
-    Supervisor::run_dev(ctx, compose, shutdown)
+    Supervisor::run_dev(ctx, compose, shutdown, dev_command)
 }

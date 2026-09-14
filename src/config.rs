@@ -23,6 +23,10 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compose_file: Option<PathBuf>,
 
+    /// Command to execute during dev mode after services are healthy (e.g. "bun run dev").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dev_command: Option<String>,
+
     #[serde(default)]
     pub orchestrator: OrchestratorConfig,
 
@@ -186,6 +190,17 @@ mod tests {
         assert!(!toml::to_string_pretty(&config).unwrap().contains("base_port"));
         config.base_port = Some(4500);
         assert!(toml::to_string_pretty(&config).unwrap().contains("base_port = 4500"));
+    }
+
+    #[test]
+    fn dev_command_is_optional_and_serializes_when_set() {
+        let config = parse("name = \"my-project\"");
+        assert_eq!(config.dev_command, None);
+        assert!(!toml::to_string_pretty(&config).unwrap().contains("dev_command"));
+
+        let with_cmd = parse("name = \"my-project\"\ndev_command = \"bun run dev\"");
+        assert_eq!(with_cmd.dev_command.as_deref(), Some("bun run dev"));
+        assert!(toml::to_string_pretty(&with_cmd).unwrap().contains("dev_command = \"bun run dev\""));
     }
 
     #[test]

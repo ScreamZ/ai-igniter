@@ -91,9 +91,11 @@ ai-igniter teardown
 
 | Command | Description |
 | :--- | :--- |
-| `ai-igniter init` | Interactive wizard to pick services and initialize `ai-igniter.toml`. |
-| `ai-igniter dev` *(alias: `up`)* | Start workspace services, create buckets/databases, run migrations and the first seed, update `.env`, and keep services running in the foreground. Stops Docker on exit (`Ctrl+C`, `SIGTERM`, `SIGHUP`) or when initialization fails. |
+| `ai-igniter init` | Interactive wizard to pick services, dev command, and initialize `ai-igniter.toml`. |
+| `ai-igniter dev` *(alias: `up`)* | Start workspace services, create buckets/databases, run migrations and the first seed, update `.env`, and optionally run `dev_command` (e.g. `bun run dev`) or keep services alive in foreground. Stops child process and Docker on exit (`Ctrl+C`, `SIGTERM`, `SIGHUP`). |
 | `ai-igniter dev --reset` | Wipe volumes, recreate fresh services, re-run migrations/seeds, then start dev. |
+| `ai-igniter dev --no-command` | Start and supervise services in the foreground, skipping any configured `dev_command`. |
+| `ai-igniter dev -- <cmd>` | Run an ad-hoc dev command overriding `dev_command` (e.g. `ai-igniter dev -- bun run dev`). |
 | `ai-igniter teardown` *(aliases: `down`, `archive`)* | Delete this workspace's containers, volumes, networks and `.igniter/`. Other projects are never touched. |
 | `ai-igniter status` | Display allocated ports and every container of the project with its state and health. |
 | `ai-igniter env` | Display evaluated environment variables (use `--write` to write them to `.env`). |
@@ -159,6 +161,7 @@ STORAGE_PUBLIC_URL = "http://my-assets{{services.garage.website_root_domain}}:{{
 
 ```toml
 name = "my-project"
+# dev_command = "bun run dev"  # Optional: command executed after services are healthy
 # base_port = 3000   # Optional fixed base port. See "Port Resolution" below.
 # compose_file = "docker-compose.dev.yml"   # Optional: use your own compose file instead of the generated one
 

@@ -127,10 +127,28 @@ pub fn execute_init(args: InitArgs) -> Result<()> {
         }
     }
 
+    let dev_command = if args.non_interactive {
+        None
+    } else {
+        let suggested_dev_cmd = detect_dev_command(&cwd);
+        let mut prompt = Text::new("App dev command to run during 'ai-igniter dev' (leave empty to skip):");
+        if let Some(ref default_cmd) = suggested_dev_cmd {
+            prompt = prompt.with_initial_value(default_cmd);
+        }
+        let input = prompt.prompt()?;
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    };
+
     let config = Config {
         name: project_name,
         base_port: None,
         compose_file: None,
+        dev_command,
         orchestrator: orchestrator_cfg,
         services,
         env_template,
@@ -162,6 +180,51 @@ fn ensure_gitignored(dir: &Path, entry: &str) -> Result<()> {
     fs::write(&path, format!("{existing}{separator}{entry}\n")).with_context(|| format!("Failed to update {:?}", path))
 }
 
+/// Inspects package.json or other project manifests to detect a recommended dev command.
+fn detect_dev_command(dir: &Path) -> Option<String> {
+    let pkg_json_path = dir.join("package.json");
+    if pkg_json_path.exists() {
+        if let Ok(content) = fs::read_to_string(&pkg_json_path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                let scripts = json.get("scripts").and_then(|s| s.as_object());
+                let has_dev = scripts.map_or(false, |s| s.contains_key("dev"));
+                let has_start = scripts.map_or(false, |s| s.contains_key("start"));
+
+                let is_bun = dir.join("bun.lock").exists()
+                    || dir.join("bun.lockb").exists()
+                    || which_command_exists("bun");
+                let is_pnpm = dir.join("pnpm-lock.yaml").exists();
+                let is_yarn = dir.join("yarn.lock").exists();
+
+                let runner = if is_bun {
+                    "bun run"
+                } else if is_pnpm {
+                    "pnpm run"
+                } else if is_yarn {
+                    "yarn"
+                } else {
+                    "npm run"
+                };
+
+                if has_dev {
+                    return Some(format!("{runner} dev"));
+                } else if has_start {
+                    return Some(format!("{runner} start"));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn which_command_exists(cmd: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|paths| {
+        std::env::split_paths(&paths)
+            .map(|p| p.join(cmd))
+            .any(|p| p.is_file())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,6 +239,23 @@ mod tests {
         ensure_gitignored(&dir, ".igniter/").unwrap();
 
         assert_eq!(fs::read_to_string(dir.join(".gitignore")).unwrap(), "node_modules\n.igniter/\n");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn detects_package_json_dev_script() {
+        let dir = std::env::temp_dir().join(format!("ai-igniter-detect-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("package.json"),
+            r#"{"scripts": {"dev": "next dev", "build": "next build"}}"#,
+        )
+        .unwrap();
+
+        let detected = detect_dev_command(&dir);
+        assert!(detected.is_some());
+        assert!(detected.unwrap().ends_with("dev"));
+
         fs::remove_dir_all(&dir).unwrap();
     }
 }

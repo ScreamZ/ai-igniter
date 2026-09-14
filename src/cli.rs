@@ -68,6 +68,14 @@ pub struct DevArgs {
     /// Wipe volumes and recreate services from scratch before starting
     #[arg(long)]
     pub reset: bool,
+
+    /// Do not run the dev_command configured in ai-igniter.toml
+    #[arg(long)]
+    pub no_command: bool,
+
+    /// Optional command to run instead of dev_command from ai-igniter.toml (e.g. `ai-igniter dev -- bun run dev`)
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub command: Vec<String>,
 }
 
 #[derive(Args, Debug)]
