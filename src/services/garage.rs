@@ -4,7 +4,7 @@ use crate::context::WorkspaceContext;
 use crate::docker::DockerCompose;
 use anyhow::{Context, Result, bail};
 use colored::Colorize;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use inquire::Text;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
