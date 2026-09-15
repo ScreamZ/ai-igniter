@@ -92,13 +92,13 @@ ai-igniter teardown
 | Command | Description |
 | :--- | :--- |
 | `ai-igniter init` | Interactive wizard to pick services, dev command, and initialize `ai-igniter.toml`. |
-| `ai-igniter dev` *(alias: `up`)* | Start workspace services, create buckets/databases, run migrations and the first seed, update `env_file` (default `.env`), and optionally run `dev_command` (e.g. `bun run dev`) or keep services alive in foreground. Stops child process and Docker on exit (`Ctrl+C`, `SIGTERM`, `SIGHUP`). |
+| `ai-igniter dev` *(alias: `up`)* | Start workspace services, create buckets/databases, run migrations and the first seed, update `env_file`, and optionally run `dev_command` (e.g. `bun run dev`) or keep services alive in foreground. Stops child process and Docker on exit (`Ctrl+C`, `SIGTERM`, `SIGHUP`). |
 | `ai-igniter dev --reset` | Wipe volumes, recreate fresh services, re-run migrations/seeds, then start dev. |
 | `ai-igniter dev --no-command` | Start and supervise services in the foreground, skipping any configured `dev_command`. |
 | `ai-igniter dev -- <cmd>` | Run an ad-hoc dev command overriding `dev_command` (e.g. `ai-igniter dev -- bun run dev`). |
 | `ai-igniter teardown` *(aliases: `down`, `archive`)* | Delete this workspace's containers, volumes, networks and `.igniter/`. Other projects are never touched. |
 | `ai-igniter status` | Display allocated ports and every container of the project with its state and health. |
-| `ai-igniter env` | Display evaluated environment variables (use `--write` to write them to `env_file`, default `.env`). |
+| `ai-igniter env` | Display evaluated environment variables (use `--write` to write them to `env_file`). |
 
 Global flags: `--dir`, `--root`, `--port`, `--config`.
 
@@ -106,12 +106,12 @@ Global flags: `--dir`, `--root`, `--port`, `--config`.
 
 ## 📝 Dynamic Environment Variables & Template Interpolation
 
-One of `ai-igniter`'s core responsibilities is generating the appropriate environment variables for your application, because **ports are dynamic** per worktree or orchestrator. The managed file defaults to `.env` and can be changed with `env_file`.
+One of `ai-igniter`'s core responsibilities is generating the appropriate environment variables for your application, because **ports are dynamic** per worktree or orchestrator. The target file is explicitly declared via `env_file`.
 
 ### How it works:
 1. Whenever `ai-igniter dev` (or `ai-igniter env --write`) runs, it evaluates the `[env_template]` table in `ai-igniter.toml`.
 2. It replaces placeholders with the ports and credentials resolved for the current worktree. A variable referencing a disabled service is skipped with a warning.
-3. On a worktree's first write, configured files are seeded from the source checkout only when their destination does not already exist. Without `copy_files`, the root `.env` is seeded into `env_file` for backward compatibility.
+3. On a worktree's first write, files listed in `copy_files` are seeded from the source checkout only when their destination does not already exist. There is no implicit copying; only explicitly declared rules in `copy_files` are executed.
 4. It atomically updates `env_file` inside a delimited section:
    ```bash
    USER_SECRET=kept-as-is
@@ -161,10 +161,11 @@ STORAGE_PUBLIC_URL = "http://my-assets{{services.garage.website_root_domain}}:{{
 
 ```toml
 name = "my-project"
+env_file = ".env"      # Required: file receiving managed env vars
+copy_files = []        # Required: files to seed from root checkout on first use
 # dev_command = "bun run dev"  # Optional: command executed after services are healthy
 # base_port = 3000   # Optional fixed base port. See "Port Resolution" below.
 # compose_file = "docker-compose.dev.yml"   # Optional: use your own compose file instead of the generated one
-# env_file = ".env.local"  # File receiving managed env vars; defaults to ".env"
 # copy_files = [
 #   { from = ".env", to = ".env.local" },
 #   ".env.test",  # shorthand for { from = ".env.test", to = ".env.test" }
@@ -173,7 +174,7 @@ name = "my-project"
 # Environment variables provided by the orchestrator
 [orchestrator]
 port_env = "PASEO_PORT"                   # base port
-root_env = "PASEO_SOURCE_CHECKOUT_PATH"   # source checkout (to seed .env in new worktrees)
+root_env = "PASEO_SOURCE_CHECKOUT_PATH"   # source checkout (to seed files in new worktrees)
 
 # Services à la carte (set enabled = false to turn one off)
 [services.postgres]
@@ -221,6 +222,7 @@ MAIL_UI_URL = "http://localhost:{{services.mailpit.port}}"
 ```
 
 Validation rules:
+- `name`, `env_file`, and `copy_files` are required.
 - Port offsets must be non-zero (0 is the app port) and unique across enabled services.
 - Custom service names match `[a-z0-9][a-z0-9_-]*` and cannot be `base`, `postgres`, `garage` or `garage_web`.
 - Custom `port_offset` and `target_port` go together.
@@ -230,7 +232,7 @@ Validation rules:
 
 `copy_files` is a one-time seed list, not a synchronization mechanism. Each source is resolved from the root checkout, each destination from the current worktree, and existing destinations are never overwritten. Parent directories are created when needed.
 
-If `copy_files` is omitted, ai-igniter retains its historical behavior: it seeds the root `.env` into `env_file` (which itself defaults to `.env`). Set `copy_files = []` to disable all automatic seeding.
+If no files need to be copied, specify `copy_files = []`. There is no default or magic copy behavior.
 
 For a Next.js or Vite project that keeps local values in `.env.local`:
 

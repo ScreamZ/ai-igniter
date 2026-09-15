@@ -5,7 +5,7 @@ use colored::Colorize;
 use inquire::{Confirm, MultiSelect, Select, Text};
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub fn execute_init(args: InitArgs) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
@@ -150,13 +150,27 @@ pub fn execute_init(args: InitArgs) -> Result<()> {
         }
     };
 
+    let env_file = if args.non_interactive {
+        PathBuf::from(".env")
+    } else {
+        let input = Text::new("Environment file to manage:")
+            .with_initial_value(".env")
+            .prompt()?;
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            PathBuf::from(".env")
+        } else {
+            PathBuf::from(trimmed)
+        }
+    };
+
     let config = Config {
         name: project_name,
         base_port: None,
         compose_file: None,
         dev_command,
-        env_file: None,
-        copy_files: None,
+        env_file,
+        copy_files: vec![],
         orchestrator: orchestrator_cfg,
         services,
         env_template,

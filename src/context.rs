@@ -371,7 +371,15 @@ pub mod tests {
     use super::*;
 
     pub fn test_ctx(config_toml: &str, base_port: Option<u16>) -> WorkspaceContext {
-        let config: Config = toml::from_str(config_toml).unwrap();
+        let mut prefix = String::new();
+        if !config_toml.contains("env_file") {
+            prefix.push_str("env_file = \".env\"\n");
+        }
+        if !config_toml.contains("copy_files") {
+            prefix.push_str("copy_files = []\n");
+        }
+        let doc = format!("{prefix}{config_toml}");
+        let config: Config = toml::from_str(&doc).unwrap();
         WorkspaceContext::from_parts(
             PathBuf::from("/work/Feature X"),
             PathBuf::from("/work/main"),
@@ -385,6 +393,8 @@ pub mod tests {
 
     const FULL: &str = r#"
 name = "My App"
+env_file = ".env"
+copy_files = []
 [services.postgres]
 database = "my-app"
 user = "my-app"

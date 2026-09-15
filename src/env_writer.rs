@@ -11,20 +11,13 @@ pub const BEGIN_MARKER: &str = "# --- Managed by ai-igniter ---";
 pub const END_MARKER: &str = "# --- End Managed by ai-igniter ---";
 
 /// Seeds configured files from the root checkout into a worktree without overwriting local files.
-///
-/// When `copy_files` is absent, the legacy behavior seeds the root `.env` into `env_file`.
-/// An explicit empty `copy_files = []` disables seeding.
 pub fn copy_workspace_files(ctx: &WorkspaceContext) -> Result<()> {
     if ctx.root_path == ctx.workspace_path {
         return Ok(());
     }
 
-    if let Some(rules) = &ctx.config.copy_files {
-        for rule in rules {
-            copy_workspace_file(ctx, &rule.from, &rule.to)?;
-        }
-    } else {
-        copy_workspace_file(ctx, Path::new(".env"), ctx.config.env_file())?;
+    for rule in &ctx.config.copy_files {
+        copy_workspace_file(ctx, &rule.from, &rule.to)?;
     }
 
     Ok(())
@@ -393,8 +386,8 @@ mod tests {
     }
 
     #[test]
-    fn legacy_seeding_uses_custom_env_file_and_manages_it() {
-        let temp = TestDir::new("legacy-custom-env");
+    fn seeding_uses_configured_copy_rules_and_manages_env_file() {
+        let temp = TestDir::new("custom-env-copy");
         let root = temp.0.join("root");
         let workspace = temp.0.join("worktree");
         fs::create_dir_all(&root).unwrap();
@@ -406,6 +399,7 @@ mod tests {
             r#"
 name = "p"
 env_file = "config/.env.local"
+copy_files = [{ from = ".env", to = "config/.env.local" }]
 [env_template]
 MANAGED = "value"
 "#,
@@ -434,6 +428,7 @@ MANAGED = "value"
             workspace.clone(),
             r#"
 name = "p"
+env_file = ".env"
 copy_files = [".env.test", { from = ".env", to = "nested/.env.local" }]
 "#,
         );
@@ -451,14 +446,18 @@ copy_files = [".env.test", { from = ".env", to = "nested/.env.local" }]
     }
 
     #[test]
-    fn explicit_empty_copy_list_disables_legacy_seeding() {
+    fn empty_copy_list_does_not_copy_anything() {
         let temp = TestDir::new("empty-copy-list");
         let root = temp.0.join("root");
         let workspace = temp.0.join("worktree");
         fs::create_dir_all(&root).unwrap();
         fs::create_dir_all(&workspace).unwrap();
         fs::write(root.join(".env"), "ROOT=one\n").unwrap();
-        let ctx = workspace_context(root, workspace.clone(), "name = \"p\"\ncopy_files = []");
+        let ctx = workspace_context(
+            root,
+            workspace.clone(),
+            "name = \"p\"\nenv_file = \".env\"\ncopy_files = []",
+        );
 
         copy_workspace_files(&ctx).unwrap();
 
@@ -472,7 +471,7 @@ copy_files = [".env.test", { from = ".env", to = "nested/.env.local" }]
         let ctx = workspace_context(
             temp.0.clone(),
             temp.0.clone(),
-            "name = \"p\"\ncopy_files = [\".env\"]",
+            "name = \"p\"\nenv_file = \".env\"\ncopy_files = [\".env\"]",
         );
 
         copy_workspace_files(&ctx).unwrap();

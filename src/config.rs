@@ -28,13 +28,10 @@ pub struct Config {
     pub dev_command: Option<String>,
 
     /// File in the workspace which receives the ai-igniter managed environment block.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_file: Option<PathBuf>,
+    pub env_file: PathBuf,
 
     /// Files seeded from the root checkout when a worktree file is absent.
-    /// `None` preserves the legacy `.env` seeding behavior; `Some(vec![])` disables it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub copy_files: Option<Vec<CopyFileRule>>,
+    pub copy_files: Vec<CopyFileRule>,
 
     #[serde(default)]
     pub orchestrator: OrchestratorConfig,
@@ -123,9 +120,7 @@ pub struct CustomServiceConfig {
 
 impl Config {
     pub fn env_file(&self) -> &Path {
-        self.env_file
-            .as_deref()
-            .unwrap_or_else(|| Path::new(".env"))
+        self.env_file.as_path()
     }
 
     pub fn load_from_file(path: &Path) -> Result<Self> {
@@ -179,17 +174,15 @@ impl Config {
         }
 
         validate_relative_file_path("`env_file`", self.env_file())?;
-        if let Some(copy_files) = &self.copy_files {
-            let mut destinations = HashSet::new();
-            for rule in copy_files {
-                validate_relative_file_path("`copy_files.from`", &rule.from)?;
-                validate_relative_file_path("`copy_files.to`", &rule.to)?;
-                if !destinations.insert(rule.to.clone()) {
-                    bail!(
-                        "`copy_files` contains more than one rule for destination {:?}",
-                        rule.to
-                    );
-                }
+        let mut destinations = HashSet::new();
+        for rule in &self.copy_files {
+            validate_relative_file_path("`copy_files.from`", &rule.from)?;
+            validate_relative_file_path("`copy_files.to`", &rule.to)?;
+            if !destinations.insert(rule.to.clone()) {
+                bail!(
+                    "`copy_files` contains more than one rule for destination {:?}",
+                    rule.to
+                );
             }
         }
 
@@ -267,7 +260,15 @@ mod tests {
     use super::*;
 
     fn parse(toml_str: &str) -> Config {
-        toml::from_str(toml_str).unwrap()
+        let mut prefix = String::new();
+        if !toml_str.contains("env_file") {
+            prefix.push_str("env_file = \".env\"\n");
+        }
+        if !toml_str.contains("copy_files") {
+            prefix.push_str("copy_files = []\n");
+        }
+        let doc = format!("{prefix}{toml_str}");
+        toml::from_str(&doc).unwrap()
     }
 
     #[test]
@@ -319,10 +320,10 @@ mod tests {
         let config = parse("name = \"p\"\ncopy_files = [\".env\"]");
         assert_eq!(
             config.copy_files,
-            Some(vec![CopyFileRule {
+            vec![CopyFileRule {
                 from: PathBuf::from(".env"),
                 to: PathBuf::from(".env"),
-            }])
+            }]
         );
     }
 
@@ -336,7 +337,7 @@ copy_files = [".env.test", { from = ".env", to = ".env.local" }]
         );
         assert_eq!(
             config.copy_files,
-            Some(vec![
+            vec![
                 CopyFileRule {
                     from: PathBuf::from(".env.test"),
                     to: PathBuf::from(".env.test"),
@@ -345,24 +346,22 @@ copy_files = [".env.test", { from = ".env", to = ".env.local" }]
                     from: PathBuf::from(".env"),
                     to: PathBuf::from(".env.local"),
                 },
-            ])
+            ]
         );
     }
 
     #[test]
-    fn explicit_empty_copy_list_is_distinct_from_legacy_default() {
-        assert_eq!(parse("name = \"p\"").copy_files, None);
-        assert_eq!(
-            parse("name = \"p\"\ncopy_files = []").copy_files,
-            Some(vec![])
+    fn copy_files_and_env_file_are_mandatory() {
+        assert!(toml::from_str::<Config>("name = \"p\"").is_err());
+        assert!(toml::from_str::<Config>("name = \"p\"\nenv_file = \".env\"").is_err());
+        assert!(toml::from_str::<Config>("name = \"p\"\ncopy_files = []").is_err());
+        assert!(
+            toml::from_str::<Config>("name = \"p\"\nenv_file = \".env\"\ncopy_files = []").is_ok()
         );
     }
 
     #[test]
-    fn env_file_defaults_and_serializes_when_set() {
-        let config = parse("name = \"p\"");
-        assert_eq!(config.env_file(), Path::new(".env"));
-
+    fn env_file_serializes_and_reads_correctly() {
         let config = parse("name = \"p\"\nenv_file = \".env.local\"");
         assert_eq!(config.env_file(), Path::new(".env.local"));
         assert!(
