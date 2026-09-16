@@ -6,6 +6,7 @@
 
 *Lightning-fast, standalone workspace & service orchestrator for AI worktrees and parallel development (Cursor, Paseo, Conductor, Orca, and CLI).*
 
+[![Crates.io](https://img.shields.io/crates/v/ai-igniter.svg?style=flat-square&logo=rust)](https://crates.io/crates/ai-igniter)
 [![Rust](https://img.shields.io/badge/built_with-Rust-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![Docker](https://img.shields.io/badge/powered_by-Docker-blue.svg?style=flat-square&logo=docker)](https://www.docker.com/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
@@ -54,16 +55,56 @@ Enable only what your project needs via `ai-igniter.toml`:
 
 ## 📦 Installation
 
-Install globally using `cargo`:
+### Via Cargo (Recommended)
+
+Install the latest release directly from [crates.io](https://crates.io/crates/ai-igniter):
 
 ```bash
+cargo install ai-igniter
+```
+
+---
+
+### Pre-built Binaries
+
+Pre-compiled standalone binaries for macOS, Linux, and Windows are also available on each release:
+
+1. Download the archive for your platform from the [GitHub Releases](https://github.com/ScreamZ/ai-igniter/releases) page:
+   - **macOS (Apple Silicon / M-series):** `ai-igniter-aarch64-apple-darwin.tar.gz`
+   - **macOS (Intel):** `ai-igniter-x86_64-apple-darwin.tar.gz`
+   - **Linux (Static / musl):** `ai-igniter-x86_64-unknown-linux-musl.tar.gz`
+   - **Linux (glibc):** `ai-igniter-x86_64-unknown-linux-gnu.tar.gz`
+   - **Windows:** `ai-igniter-x86_64-pc-windows-msvc.zip`
+
+2. Extract and move the binary to your `PATH`:
+
+```bash
+# macOS / Linux example
+tar -xzf ai-igniter-*-apple-darwin.tar.gz
+sudo mv ai-igniter /usr/local/bin/
+```
+
+> **Note:** For bleeding-edge/unreleased builds, you can also download binary artifacts directly from the [GitHub Actions CI runs](https://github.com/ScreamZ/ai-igniter/actions/workflows/release.yml).
+
+---
+
+### From Source (Development)
+
+To build and install `ai-igniter` locally from source:
+
+```bash
+# Clone the repository
+git clone https://github.com/ScreamZ/ai-igniter.git
+cd ai-igniter
+
+# Install locally with Cargo
 cargo install --path .
 ```
 
-Or copy the compiled binary to your `PATH`:
+Or build the release binary manually:
 
 ```bash
-# macOS / Linux
+cargo build --release
 sudo cp target/release/ai-igniter /usr/local/bin/
 ```
 
