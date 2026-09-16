@@ -1,65 +1,223 @@
+<div align="center">
+
 # 🚀 ai-igniter
 
-> **Lightning-fast, extensible workspace & service orchestrator for AI worktrees** (Paseo, Conductor, Orca, Cursor, etc.).
+**Stop fighting port conflicts across git worktrees. Start coding.**
 
-`ai-igniter` replaces complex and brittle bash/node scripts with a single, standalone **Rust binary**. It provides complete lifecycle management for parallel git worktrees, isolated Docker services (PostgreSQL, Garage S3, Custom), and dynamic environment variable synchronization into a configurable environment file.
+*Lightning-fast, standalone workspace & service orchestrator for AI worktrees and parallel development (Cursor, Paseo, Conductor, Orca, and CLI).*
+
+[![Rust](https://img.shields.io/badge/built_with-Rust-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org/)
+[![Docker](https://img.shields.io/badge/powered_by-Docker-blue.svg?style=flat-square&logo=docker)](https://www.docker.com/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
+
+<br />
+
+<!-- Replace with actual recording/demo -->
+```
+   ┌─────────────────────────────────────────────────────────────┐
+   │                                                             │
+   │      [ Demo GIF / Terminal Recording Placeholder ]          │
+   │               ./assets/demo.gif                             │
+   │                                                             │
+   └─────────────────────────────────────────────────────────────┘
+```
+
+</div>
 
 ---
 
-## ✨ Key Features
+## 💡 Why ai-igniter?
 
-- 🏎️ **Lightweight & Fast:** Single standalone binary, no runtime besides Docker.
-- 🧩 **Services "À la carte":** Toggle and configure services per project via `ai-igniter.toml`. The Compose file is regenerated on every run, so enabling, disabling or reconfiguring a service takes effect on the next `dev`:
-  - **PostgreSQL**: Container with TCP healthcheck, secondary (e2e) database, migrations runner, and a seed that runs once per fresh volume.
-  - **Garage S3**: Default key, bucket creation, permissions, website hosting, and S3 CORS configuration without external scripts.
-  - **Custom Services**: Any Docker image with ports, environment, command and volumes declared in TOML.
-- 🔄 **Orchestrator Agnostic:** Maps dynamic ports and source checkouts from **Paseo**, **Conductor**, **Orca**, or generic `WORKSPACE_*` variables. Without an orchestrator port, each worktree gets a stable port derived from its path.
-- 🛡️ **Safe Port Reclaiming:** Ports held by another *ai-igniter* project are freed (containers stopped, volumes kept). Containers ai-igniter did not create are never touched.
-- 🎯 **Dedicated Service Keep-Alive:** Keeps services running in foreground, exits with an error if a service dies, and stops Docker on `Ctrl+C` / `SIGTERM` / `SIGHUP` — including during startup.
-- 📝 **Atomic Environment Management:** Interpolates service URLs, credentials, and ports into a delimited section of `.env` (or a configured target), preserving every other line.
+When using **AI coding agents** (Cursor Agent, Claude Code, Paseo, Conductor) or working across **multiple Git worktrees** in parallel, your local development quickly breaks:
+
+- 💥 **Port Conflicts:** Multiple branches try to bind to `3000`, `5432`, or `9000` simultaneously.
+- 🤯 **Dirty `.env` Files:** Manual updates of database URLs and credentials per worktree are fragile and tedious.
+- 🐌 **Heavy Orchestration Scripts:** Fragile bash or Node glue-scripts to manage Docker containers, healthchecks, and migrations.
+
+**`ai-igniter` solves this completely.** It replaces complex scripts with a single, standalone **Rust binary** that orchestrates isolated services, resolves dynamic ports, runs migrations & seeds, and injects clean environment variables automatically.
+
+---
+
+## 🏛️ The Three Pillars
+
+### 1. 🚦 Automatic Port Resolution & Isolation
+- **Dynamic Port Mapping:** Every worktree gets its own isolated port space derived from its path or provided by an orchestrator (`Paseo`, `Conductor`, etc.).
+- **Safe Port Reclaiming:** Ports held by inactive `ai-igniter` containers are automatically freed without losing your volumes. Containers from external tools are left untouched.
+- **Anti-Hijacking Resolution:** Strict directory and worktree resolution guarantees commands *never* accidentally target another project's worktree.
+
+### 2. 🧱 Zero-Config "À la Carte" Services
+Enable only what your project needs via `ai-igniter.toml`:
+- **PostgreSQL:** Instant container with TCP health checks, optional secondary (E2E) database, automatic migration runners, and one-time initial seeders.
+- **Garage S3:** Self-contained S3-compatible storage with automatic bucket creation, access keys, permissions, CORS, and website hosting endpoints.
+- **Custom Docker Services:** Any Docker image (e.g. Mailpit, Redis, Meilisearch) configured with custom ports and volumes in seconds.
+
+### 3. 📝 Atomic Environment Management
+- Injects evaluated service URLs, credentials, and ports into a dedicated section of your target environment file (e.g., `.env` or `.env.local`).
+- Preserves all your existing custom variables outside the managed section.
+- One-time seed copying (`copy_files`) from your main repository checkout when creating new worktrees.
 
 ---
 
 ## 📦 Installation
 
-To install `ai-igniter` globally on your machine:
+Install globally using `cargo`:
 
 ```bash
 cargo install --path .
 ```
 
-Or copy the compiled release binary directly to your `PATH`:
+Or copy the compiled binary to your `PATH`:
 
 ```bash
-cp target/release/ai-igniter ~/.cargo/bin/
-# or
+# macOS / Linux
 sudo cp target/release/ai-igniter /usr/local/bin/
 ```
 
 ---
 
-## 🚀 Quick Start
+## ⚡ Quick Start
 
-### 1. Initialize a Project
+### 1. Initialize your project
 
-In any repository root:
+Run the interactive wizard in your repository root:
 
 ```bash
 ai-igniter init
 ```
 
-The interactive wizard prompts you for:
-- Project name (normalized to lowercase letters, digits, `-` and `_`)
-- Orchestrator (Paseo, Conductor, Orca, Custom)
-- Services to enable (PostgreSQL, Garage S3)
-- If PostgreSQL is selected: migration and seed commands (with defaults, or empty to skip)
+This guides you through selecting your orchestrator, configuring services (PostgreSQL, S3), and creates an `ai-igniter.toml` configuration file.
 
-This generates `ai-igniter.toml` and adds `.igniter/` to `.gitignore`. Use `--non-interactive` for defaults and `--force` to overwrite an existing file.
+### 2. Start developing
 
-Commit `ai-igniter.toml` so every worktree shares it. If it stays untracked, worktrees fall back to the main checkout's copy.
+Spin up all workspace services, run migrations/seeds, update `.env`, and start your dev server in one step:
 
-### 2. Integration with Paseo (`paseo.json`)
+```bash
+ai-igniter dev
+```
 
+> **Tip:** When you press `Ctrl+C`, `ai-igniter` gracefully stops all associated Docker containers and child processes.
+
+### 3. Teardown when finished
+
+When you delete or archive a worktree, clean up all associated containers, networks, and volumes cleanly:
+
+```bash
+ai-igniter teardown
+```
+
+---
+
+## ⚙️ Configuration (`ai-igniter.toml`)
+
+### Minimal Example
+
+Here is all you need for a full Next.js / Node app with PostgreSQL:
+
+```toml
+name = "my-awesome-app"
+env_file = ".env"
+copy_files = []
+dev_command = "bun run dev"
+
+[services.postgres]
+enabled = true
+port_offset = 1
+database = "app_db"
+user = "app_user"
+password = "app_password"
+migrate_command = "bun run db:migrate"
+
+[env_template]
+DATABASE_URL = "{{services.postgres.url}}"
+APP_URL = "http://localhost:{{ports.base}}"
+```
+
+<details>
+<summary><b>🔍 View Full Comprehensive Configuration Reference</b></summary>
+
+<br>
+
+```toml
+name = "my-project"
+env_file = ".env"                          # Target file receiving managed env vars
+copy_files = []                            # Files to seed from root checkout on first use
+dev_command = "bun run dev"                # Command executed after services are healthy
+# base_port = 3000                         # Optional fixed base port
+# compose_file = "docker-compose.dev.yml"  # Optional: use custom compose file
+
+# Orchestrator environment variable hooks
+[orchestrator]
+port_env = "PASEO_PORT"
+root_env = "PASEO_SOURCE_CHECKOUT_PATH"
+
+# Built-in PostgreSQL
+[services.postgres]
+enabled = true
+port_offset = 1
+image = "postgres:16"
+database = "my-project"
+user = "my-project"
+password = "my-project"
+e2e_database = "my-project_e2e"
+migrate_command = "bun run db:migrate"
+seed_command = "bun run db:seed"
+# seed_check_sql = "SELECT count(*) FROM users"
+
+# Built-in Garage S3
+[services.garage]
+enabled = true
+port_offset = 3
+web_port_offset = 4
+image = "dxflrs/garage:v2.4.1"
+access_key = "my-project-local-access-key"
+secret_key = "my-project-local-secret-key-change-me"
+buckets = ["my-project-assets"]
+website_buckets = ["my-project-assets"]
+website_root_domain = ".web.localhost"
+
+# Custom Services (e.g. Mailpit)
+[services.custom.mailpit]
+image = "axllent/mailpit"
+port_offset = 8
+target_port = 8025
+environment = { MP_MAX_MESSAGES = "500" }
+command = ["--smtp-auth-accept-any"]
+volumes = ["./.mailpit:/data", "mailpit-cache:/cache"]
+
+# Dynamic environment template
+[env_template]
+DATABASE_URL = "{{services.postgres.url}}"
+DATABASE_MIGRATION_URL = "{{services.postgres.url}}"
+E2E_DATABASE_URL = "{{services.postgres.e2e_url}}"
+S3_ENDPOINT = "{{services.garage.endpoint}}"
+S3_ACCESS_KEY_ID = "{{services.garage.access_key}}"
+S3_SECRET_ACCESS_KEY = "{{services.garage.secret_key}}"
+S3_REGION = "{{services.garage.region}}"
+S3_BUCKET = "my-project-assets"
+S3_PUBLIC_URL = "http://my-project-assets{{services.garage.website_root_domain}}:{{services.garage.web_port}}"
+MAIL_UI_URL = "http://localhost:{{services.mailpit.port}}"
+APP_URL = "http://localhost:{{ports.base}}"
+```
+
+#### Available Template Placeholders
+
+| Placeholder | Description |
+| :--- | :--- |
+| `{{ports.base}}` | Primary workspace application port |
+| `{{ports.<name>}}` / `{{ports.base + N}}` | Allocated port for a service, or base + arithmetic offset |
+| `{{services.postgres.url}}` / `e2e_url` | Full PostgreSQL connection URLs with URL-encoded credentials |
+| `{{services.postgres.port}}` / `host` / `user` / `password` / `database` | Granular PostgreSQL connection details |
+| `{{services.garage.endpoint}}` / `access_key` / `secret_key` / `web_port` | Garage S3 connection & web endpoints |
+| `{{services.<name>.port}}` | Host port for custom service declared in `[services.custom.<name>]` |
+| `{{workspace.slug}}` / `{{workspace.hash}}` / `{{workspace.path}}` | Current workspace identity metadata |
+
+</details>
+
+---
+
+## 🤖 Orchestrator Integrations
+
+### Paseo (`paseo.json`)
 ```json
 {
   "worktree": {
@@ -74,239 +232,49 @@ Commit `ai-igniter.toml` so every worktree shares it. If it stays untracked, wor
 }
 ```
 
-### 3. Integration with Conductor / Standalone
-
-Start services and generate the configured environment file:
-```bash
-ai-igniter dev
-```
-And stop/teardown when done:
-```bash
-ai-igniter teardown
-```
+### Conductor / Cursor Worktrees / Standalone CLI
+Add `ai-igniter dev` to your worktree initialization hook or launch task, and `ai-igniter teardown` on worktree deletion.
 
 ---
 
-## 🛠️ CLI Commands
+## 🛠️ CLI Command Reference
 
 | Command | Description |
 | :--- | :--- |
-| `ai-igniter init` | Interactive wizard to pick services, dev command, and initialize `ai-igniter.toml`. |
-| `ai-igniter dev` *(alias: `up`)* | Start workspace services, create buckets/databases, run migrations and the first seed, update `env_file`, and optionally run `dev_command` (e.g. `bun run dev`) or keep services alive in foreground. Stops child process and Docker on exit (`Ctrl+C`, `SIGTERM`, `SIGHUP`). |
-| `ai-igniter dev --reset` | Wipe volumes, recreate fresh services, re-run migrations/seeds, then start dev. |
-| `ai-igniter dev --no-command` | Start and supervise services in the foreground, skipping any configured `dev_command`. |
-| `ai-igniter dev -- <cmd>` | Run an ad-hoc dev command overriding `dev_command` (e.g. `ai-igniter dev -- bun run dev`). |
-| `ai-igniter teardown` *(aliases: `down`, `archive`)* | Delete this workspace's containers, volumes, networks and `.igniter/`. Other projects are never touched. |
-| `ai-igniter status` | Display allocated ports and every container of the project with its state and health. |
-| `ai-igniter env` | Display evaluated environment variables (use `--write` to write them to `env_file`). |
-
-Global flags: `--dir`, `--root`, `--port`, `--config`.
-
----
-
-## 📝 Dynamic Environment Variables & Template Interpolation
-
-One of `ai-igniter`'s core responsibilities is generating the appropriate environment variables for your application, because **ports are dynamic** per worktree or orchestrator. The target file is explicitly declared via `env_file`.
-
-### How it works:
-1. Whenever `ai-igniter dev` (or `ai-igniter env --write`) runs, it evaluates the `[env_template]` table in `ai-igniter.toml`.
-2. It replaces placeholders with the ports and credentials resolved for the current worktree. A variable referencing a disabled service is skipped with a warning.
-3. On a worktree's first write, files listed in `copy_files` are seeded from the source checkout only when their destination does not already exist. There is no implicit copying; only explicitly declared rules in `copy_files` are executed.
-4. It atomically updates `env_file` inside a delimited section:
-   ```bash
-   USER_SECRET=kept-as-is
-
-   # --- Managed by ai-igniter ---
-   DATABASE_URL=postgresql://my-project:my-project@127.0.0.1:3001/my-project
-   S3_ENDPOINT=http://localhost:3003
-   # --- End Managed by ai-igniter ---
-
-   ANOTHER_USER_VAR=also-kept
-   ```
-   Lines outside the section are preserved, except duplicate definitions of managed keys. Values containing spaces, `#`, quotes or `$` are quoted.
-
-Migration and seed commands run with the same variables in their environment.
-
-### Available Template Placeholders:
-
-| Placeholder | Meaning |
-| :--- | :--- |
-| `{{ports.base}}` | Workspace base port (app port) |
-| `{{ports.<name>}}`, `{{ports.base + N}}` | Any allocated port (`postgres`, `garage`, `garage_web`, custom names), or base + offset |
-| `{{project.name}}`, `{{workspace.slug}}`, `{{workspace.hash}}`, `{{workspace.compose_project}}`, `{{workspace.path}}`, `{{workspace.root}}` | Workspace identity |
-| `{{services.postgres.url}}` / `e2e_url` | Full connection URLs, credentials URL-encoded |
-| `{{services.postgres.port}}` / `host` / `user` / `password` / `database` / `e2e_database` | Individual PostgreSQL values |
-| `{{services.garage.endpoint}}` / `port` / `web_port` / `access_key` / `secret_key` / `region` / `website_root_domain` | Garage S3 values |
-| `{{services.<name>.port}}` | Host port of a custom service declared under `[services.custom.<name>]` |
-
-Unknown placeholders are errors in commands and skipped variables in `.env`.
-
-### Adding Custom Variables to `env_template`:
-
-```toml
-[env_template]
-DATABASE_URL = "{{services.postgres.url}}"
-S3_ENDPOINT = "{{services.garage.endpoint}}"
-
-# Custom application-specific variables using the dynamic ports
-APP_URL = "http://localhost:{{ports.base}}"
-NEXT_PUBLIC_API_URL = "http://localhost:{{ports.base}}/api"
-STORYBOOK_URL = "http://localhost:{{ports.base + 10}}"
-STORAGE_PUBLIC_URL = "http://my-assets{{services.garage.website_root_domain}}:{{services.garage.web_port}}"
-```
-
----
-
-## ⚙️ Configuration Reference (`ai-igniter.toml`)
-
-```toml
-name = "my-project"
-env_file = ".env"      # Required: file receiving managed env vars
-copy_files = []        # Required: files to seed from root checkout on first use
-# dev_command = "bun run dev"  # Optional: command executed after services are healthy
-# base_port = 3000   # Optional fixed base port. See "Port Resolution" below.
-# compose_file = "docker-compose.dev.yml"   # Optional: use your own compose file instead of the generated one
-# copy_files = [
-#   { from = ".env", to = ".env.local" },
-#   ".env.test",  # shorthand for { from = ".env.test", to = ".env.test" }
-# ]
-
-# Environment variables provided by the orchestrator
-[orchestrator]
-port_env = "PASEO_PORT"                   # base port
-root_env = "PASEO_SOURCE_CHECKOUT_PATH"   # source checkout (to seed files in new worktrees)
-
-# Services à la carte (set enabled = false to turn one off)
-[services.postgres]
-enabled = true
-port_offset = 1
-image = "postgres:16"
-database = "my-project"
-user = "my-project"
-password = "my-project"
-e2e_database = "my-project_e2e"
-migrate_command = "bun run db:migrate"
-seed_command = "bun run db:seed"
-# seed_check_sql = "SELECT count(*) FROM users"   # Optional: skip the seed when > 0
-
-[services.garage]
-enabled = true
-port_offset = 3
-web_port_offset = 4
-image = "dxflrs/garage:v2.4.1"
-access_key = "my-project-local-access-key"
-secret_key = "my-project-local-secret-key-change-me"
-buckets = ["my-project-assets"]
-website_buckets = ["my-project-assets"]   # created too if missing from `buckets`
-website_root_domain = ".web.localhost"
-
-[services.custom.mailpit]
-image = "axllent/mailpit"
-port_offset = 8
-target_port = 8025
-environment = { MP_MAX_MESSAGES = "500" }
-command = ["--smtp-auth-accept-any"]
-volumes = ["./.mailpit:/data", "mailpit-cache:/cache"]   # relative paths resolve from the workspace
-
-[env_template]
-DATABASE_URL = "{{services.postgres.url}}"
-DATABASE_MIGRATION_URL = "{{services.postgres.url}}"
-E2E_DATABASE_URL = "{{services.postgres.e2e_url}}"
-S3_ENDPOINT = "{{services.garage.endpoint}}"
-S3_ACCESS_KEY_ID = "{{services.garage.access_key}}"
-S3_SECRET_ACCESS_KEY = "{{services.garage.secret_key}}"
-S3_REGION = "{{services.garage.region}}"
-S3_BUCKET = "my-project-assets"
-S3_PUBLIC_URL = "http://my-project-assets{{services.garage.website_root_domain}}:{{services.garage.web_port}}"
-MAIL_UI_URL = "http://localhost:{{services.mailpit.port}}"
-```
-
-Validation rules:
-- `name`, `env_file`, and `copy_files` are required.
-- Port offsets must be non-zero (0 is the app port) and unique across enabled services.
-- Custom service names match `[a-z0-9][a-z0-9_-]*` and cannot be `base`, `postgres`, `garage` or `garage_web`.
-- Custom `port_offset` and `target_port` go together.
-- `env_file`, `copy_files.from`, and `copy_files.to` must be non-empty relative paths without `..`; two copy rules cannot target the same destination.
-
-### Seeding Workspace Files
-
-`copy_files` is a one-time seed list, not a synchronization mechanism. Each source is resolved from the root checkout, each destination from the current worktree, and existing destinations are never overwritten. Parent directories are created when needed.
-
-If no files need to be copied, specify `copy_files = []`. There is no default or magic copy behavior.
-
-For a Next.js or Vite project that keeps local values in `.env.local`:
-
-```toml
-env_file = ".env.local"
-copy_files = [{ from = ".env", to = ".env.local" }]
-```
-
-Values are passed to Docker literally (`$` is escaped). The seed runs once per fresh database volume, tracked with a comment on the database. Set `seed_check_sql` to use your own condition, or `dev --reset` to start over.
-
-### Port Resolution
-
-The base port is the first available of:
-1. `--port`
-2. `$<orchestrator.port_env>`, then `$WORKSPACE_PORT`, `$PASEO_PORT`, `$CONDUCTOR_PORT` (an invalid value is an error)
-3. `base_port` from the config
-4. A stable port derived from the workspace path, in `20000..=59980` by steps of 20 (keep offsets below 20)
-
-Each service listens on `base port + offset`.
-
-### Using Your Own Compose File
-
-With `compose_file`, ai-igniter runs that file under the workspace's Compose project. Allocated ports are exported as `IGNITER_<NAME>_PORT` (e.g. `"${IGNITER_POSTGRES_PORT}:5432"`). Built-in post-start steps expect services named `postgres` and `garage`.
-
----
-
-## 🛡️ Safe Workspace Resolution & Anti-Hijacking
-
-When working across multiple repositories and parallel worktrees, terminal sessions often inherit environment variables (such as `PASEO_WORKTREE_PATH` or `CONDUCTOR_WORKSPACE_PATH`) from concurrent AI sessions or IDE terminals.
-
-`ai-igniter` implements a strict resolution hierarchy (similar to Git and Cargo) to guarantee that commands **never accidentally run in another project's worktree**:
-
-1. **Explicit Flag (`--dir <PATH>`)**:
-   An explicit `--dir` argument always has top priority.
-2. **Local Project Priority**:
-   The nearest directory containing `ai-igniter.toml` is used, searching upward **but never past the current git worktree**. A worktree nested inside the main checkout (e.g. `.claude/worktrees/…`) is never mistaken for the main project. Inside a git worktree without its own config, the worktree is the workspace and the config is read from the main checkout.
-3. **External Orchestrator Invocation**:
-   Only when invoked from outside any git repository or project, `WORKSPACE_PATH`, `PASEO_WORKTREE_PATH`, `CONDUCTOR_WORKSPACE_PATH` or `ORCA_WORKSPACE_PATH` locate the target worktree.
-4. **Strict 1:1 Workspace Isolation**:
-   The Docker Compose project (`{project}-{slug}-{hash}`), `.igniter/`, the configured environment file, and all migration/seed commands are scoped to the resolved workspace.
-
-### Port Reclaiming
-
-Before starting, `dev` inspects running containers bound to the workspace's ports:
-- Containers of **another ai-igniter project** (label `ai-igniter.managed=true`) are stopped with `docker compose down`, **keeping their volumes**. That workspace gets its data back on its next `dev`.
-- **Any other container** is left untouched with a warning; `docker compose up` then reports the conflict.
-
-`teardown` never reclaims: it only removes its own project.
+| `ai-igniter init` | Interactive wizard to initialize `ai-igniter.toml`. |
+| `ai-igniter dev` *(alias: `up`)* | Start services, run migrations/seeds, write `.env`, and launch dev command. |
+| `ai-igniter dev --reset` | Reset database/storage volumes to fresh state, re-seed, and start. |
+| `ai-igniter dev --no-command` | Run and supervise background Docker services without launching `dev_command`. |
+| `ai-igniter dev -- <cmd>` | Override the default `dev_command` (e.g. `ai-igniter dev -- cargo run`). |
+| `ai-igniter teardown` *(alias: `down`)* | Stop and remove this workspace's containers, networks, and volumes. |
+| `ai-igniter status` | Inspect allocated ports and container health for the current workspace. |
+| `ai-igniter env` | Print or update (`--write`) evaluated environment variables. |
 
 ---
 
 ## 🏗️ Architecture & Extensibility
 
+`ai-igniter` is built in Rust with modularity in mind:
+
 ```
 src/
-├── cli.rs               # Clap command definitions and argument parsing
-├── commands/            # Command implementations (init, dev, teardown, status, env)
-├── config.rs            # TOML config parsing, validation, and defaults
-├── context.rs           # Workspace/root resolution, port allocation, template variables
-├── docker/
-│   ├── compose.rs       # Compose generation (JSON) & docker compose runner
-│   └── reclaim.rs       # Reclaiming ports held by other ai-igniter projects
-├── env_writer.rs        # Atomic .env merge
-├── services/
-│   ├── garage.rs        # Garage S3 setup (buckets, permissions, website, CORS)
-│   └── postgres.rs      # Secondary database, migrations, and seed
-└── supervisor.rs        # Signal handling & services keep-alive
+├── cli.rs               # Clap definitions & CLI arguments
+├── commands/            # init, dev, teardown, status, env
+├── config.rs            # TOML parsing, validation & defaults
+├── context.rs           # Workspace & port resolution engine
+├── docker/              # Dynamic Compose generator & port reclaimer
+├── env_writer.rs        # Atomic .env delimiter engine
+├── services/            # Built-in providers (PostgreSQL, Garage S3, Custom)
+└── supervisor.rs        # Process supervisor & signal trap (SIGINT/SIGTERM)
 ```
 
-To add a new built-in service (e.g. `Redis`, `Meilisearch`, `LocalStack`):
-1. Create `src/services/<service_name>.rs` containing:
-   - Its TOML configuration struct
-   - Its `ServiceProvider` implementation (`prompt_init`, `port_offsets`, `contribute_compose`, `contribute_template_vars`, `post_start`)
-2. Register the provider in `BUILTIN_SERVICES` in [src/services/mod.rs](src/services/mod.rs) and add its optional field in `ServicesConfig`.
-All commands (`init`, `dev`, `env`, etc.) automatically support it without further changes!
+### Adding a new built-in service
+1. Create `src/services/<service_name>.rs` implementing the `ServiceProvider` trait.
+2. Register it in `BUILTIN_SERVICES` in [`src/services/mod.rs`](file:///Users/screamz/dev-workspace/perso/ai-tools/src/services/mod.rs).
+3. All commands (`init`, `dev`, `status`, etc.) will automatically support your new service!
 
-Run the tests with `cargo test`.
+---
+
+## 📄 License
+
+MIT © [ScreamZ](https://github.com/ScreamZ)
