@@ -116,7 +116,7 @@ fn host_ports(container: &Value) -> Vec<u16> {
         .flat_map(|bindings| bindings.values())
         .filter_map(Value::as_array)
         .flatten()
-        .filter_map(|binding| binding["HostPort"].as_str()?.parse().ok())
+        .filter_map(|binding| binding["HostPort"].as_str()?.parse::<u16>().ok())
         .collect()
 }
 
