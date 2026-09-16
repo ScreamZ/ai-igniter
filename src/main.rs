@@ -29,6 +29,13 @@ fn run(cli: Cli) -> Result<()> {
         return commands::execute_init(args);
     }
 
+    if let Commands::Update(args) = cli.command {
+        return commands::execute_update(args.check, args.cargo);
+    }
+
+    // Check for updates asynchronously without blocking command execution
+    let _update_guard = commands::spawn_background_update_checker();
+
     let ctx = WorkspaceContext::resolve(&cli).context("Failed to resolve workspace context")?;
 
     // If not local execution (e.g. running inside a cloud orchestrator sandbox), skip local Docker services
@@ -41,7 +48,7 @@ fn run(cli: Cli) -> Result<()> {
     }
 
     match &cli.command {
-        Commands::Init(_) => unreachable!(),
+        Commands::Init(_) | Commands::Update(_) => unreachable!(),
         Commands::Dev(args) => commands::execute_dev(&ctx, args),
         Commands::Teardown => commands::execute_teardown(&ctx),
         Commands::Status => commands::execute_status(&ctx),

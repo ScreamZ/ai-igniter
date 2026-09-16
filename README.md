@@ -49,7 +49,7 @@ Enable only what your project needs via `ai-igniter.toml`:
 - Preserves all your existing custom variables outside the managed section.
 - One-time seed copying (`copy_files`) from your main repository checkout when creating new worktrees.
 
-> 📖 **Deep Dive:** Want to understand the resolution hierarchy, deterministic port hashing, and anti-hijacking system? Check out the [Workspace Resolution & Port Allocation Guide](file:///Users/screamz/dev-workspace/perso/ai-tools/docs/workspace-resolution.md).
+> 📖 **Deep Dive:** Want to understand the resolution hierarchy, deterministic port hashing, and anti-hijacking system? Check out the [Workspace Resolution & Port Allocation Guide](file:///Users/screamz/dev-workspace/perso/ai-tools/docs/workspace-resolution.md). For details on the dual-engine auto-updater and non-blocking background notifications, read the [Update & Release Architecture Guide](file:///Users/screamz/dev-workspace/perso/ai-tools/docs/update-architecture.md).
 
 ---
 
@@ -284,6 +284,7 @@ Add `ai-igniter dev` to your worktree initialization hook or launch task, and `a
 | `ai-igniter teardown` *(alias: `down`)* | Stop and remove this workspace's containers, networks, and volumes. |
 | `ai-igniter status` | Inspect allocated ports and container health for the current workspace. |
 | `ai-igniter env` | Print or update (`--write`) evaluated environment variables. |
+| `ai-igniter update` *(alias: `upgrade`)* | Check for and install updates via GitHub Releases (or `--cargo`). |
 
 ---
 
@@ -294,7 +295,7 @@ Add `ai-igniter dev` to your worktree initialization hook or launch task, and `a
 ```
 src/
 ├── cli.rs               # Clap definitions & CLI arguments
-├── commands/            # init, dev, teardown, status, env
+├── commands/            # init, dev, teardown, status, env, update
 ├── config.rs            # TOML parsing, validation & defaults
 ├── context.rs           # Workspace & port resolution engine
 ├── docker/              # Dynamic Compose generator & port reclaimer

@@ -46,6 +46,10 @@ pub enum Commands {
 
     /// Compute and display or write workspace environment variables
     Env(EnvArgs),
+
+    /// Check for updates and update ai-igniter to the latest version
+    #[command(alias = "upgrade")]
+    Update(UpdateArgs),
 }
 
 #[derive(Args, Debug)]
@@ -83,4 +87,15 @@ pub struct EnvArgs {
     /// Write the evaluated variables to env_file
     #[arg(short, long)]
     pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct UpdateArgs {
+    /// Only check if an update is available without downloading or replacing the binary
+    #[arg(long)]
+    pub check: bool,
+
+    /// Force update via cargo (`cargo install ai-igniter --force`) instead of GitHub Releases
+    #[arg(long)]
+    pub cargo: bool,
 }
