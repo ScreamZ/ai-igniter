@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use colored::Colorize;
 use self_update::cargo_crate_version;
 use std::process::Command;
@@ -30,7 +30,10 @@ fn current_target_triple() -> &'static str {
         "x86_64-pc-windows-msvc"
     }
     #[cfg(not(any(
-        all(target_os = "macos", any(target_arch = "aarch64", target_arch = "x86_64")),
+        all(
+            target_os = "macos",
+            any(target_arch = "aarch64", target_arch = "x86_64")
+        ),
         target_os = "linux",
         target_os = "windows"
     )))]
@@ -49,10 +52,7 @@ pub fn execute_update(check_only: bool, force_cargo: bool) -> Result<()> {
 
     if force_cargo {
         if check_only {
-            println!(
-                "{} Querying crates.io / cargo...",
-                "[info]".blue().bold()
-            );
+            println!("{} Querying crates.io / cargo...", "[info]".blue().bold());
         }
         return update_via_cargo(check_only);
     }
@@ -93,10 +93,14 @@ fn update_via_github(check_only: bool) -> Result<bool> {
         .show_download_progress(true)
         .show_output(false);
 
-    let updater = builder.build().context("Failed to configure GitHub updater")?;
+    let updater = builder
+        .build()
+        .context("Failed to configure GitHub updater")?;
 
     if check_only {
-        let releases = updater.get_latest_release().context("Failed to fetch latest release")?;
+        let releases = updater
+            .get_latest_release()
+            .context("Failed to fetch latest release")?;
         let latest = match releases.latest() {
             Some(r) => r,
             None => {
@@ -117,10 +121,7 @@ fn update_via_github(check_only: bool) -> Result<bool> {
                 current_v.yellow(),
                 latest_ver.green().bold()
             );
-            println!(
-                "Run {} to upgrade.",
-                "ai-igniter update".bold().cyan()
-            );
+            println!("Run {} to upgrade.", "ai-igniter update".bold().cyan());
             return Ok(true);
         } else {
             println!(
@@ -132,7 +133,9 @@ fn update_via_github(check_only: bool) -> Result<bool> {
         }
     }
 
-    let status = updater.update().context("Failed to perform binary update")?;
+    let status = updater
+        .update()
+        .context("Failed to perform binary update")?;
     if status.is_updated() {
         println!(
             "{} Successfully updated ai-igniter to version {}!",
@@ -154,7 +157,9 @@ fn update_via_cargo(check_only: bool) -> Result<()> {
     // Check if cargo is available in PATH
     let cargo_check = Command::new("cargo").arg("--version").output();
     if cargo_check.is_err() {
-        bail!("'cargo' executable not found in PATH. Please install Rust or download pre-built binaries from GitHub Releases.");
+        bail!(
+            "'cargo' executable not found in PATH. Please install Rust or download pre-built binaries from GitHub Releases."
+        );
     }
 
     if check_only {
@@ -212,7 +217,11 @@ fn cache_file_path() -> Option<PathBuf> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .ok()?;
-    Some(PathBuf::from(home).join(".ai-igniter").join("update_cache.json"))
+    Some(
+        PathBuf::from(home)
+            .join(".ai-igniter")
+            .join("update_cache.json"),
+    )
 }
 
 fn read_cache() -> Option<UpdateCache> {
@@ -253,7 +262,10 @@ impl Drop for UpdateNotifierGuard {
             if std::io::stderr().is_terminal() {
                 let current_v = cargo_crate_version!();
                 eprintln!();
-                eprintln!("{}", "╭─────────────────────────────────────────────────────────────╮".yellow());
+                eprintln!(
+                    "{}",
+                    "╭─────────────────────────────────────────────────────────────╮".yellow()
+                );
                 eprintln!(
                     "{}   Update available: {} {} {}",
                     "│".yellow(),
@@ -267,7 +279,10 @@ impl Drop for UpdateNotifierGuard {
                     "ai-igniter update".bold().cyan(),
                     "│".yellow()
                 );
-                eprintln!("{}", "╰─────────────────────────────────────────────────────────────╯".yellow());
+                eprintln!(
+                    "{}",
+                    "╰─────────────────────────────────────────────────────────────╯".yellow()
+                );
                 eprintln!();
             }
         }
@@ -286,7 +301,8 @@ pub fn spawn_background_update_checker() -> UpdateNotifierGuard {
 
     let should_fetch = match &cache {
         Some(c) => {
-            if self_update::version::bump_is_greater(current_v, &c.latest_version).unwrap_or(false) {
+            if self_update::version::bump_is_greater(current_v, &c.latest_version).unwrap_or(false)
+            {
                 newer_version = Some(c.latest_version.clone());
             }
             now.saturating_sub(c.last_checked_at) >= CACHE_TTL_SECS

@@ -82,9 +82,7 @@ impl Supervisor {
                 image_info.dimmed()
             );
         }
-        let interpolated_cmd = dev_command
-            .map(|cmd| ctx.interpolate(cmd))
-            .transpose()?;
+        let interpolated_cmd = dev_command.map(|cmd| ctx.interpolate(cmd)).transpose()?;
 
         safe_println!();
         if let Some(cmd) = &interpolated_cmd {
@@ -203,10 +201,7 @@ pub fn dev_env(ctx: &WorkspaceContext) -> BTreeMap<String, String> {
     env
 }
 
-pub fn create_dev_command(
-    ctx: &WorkspaceContext,
-    cmd: &str,
-) -> Result<std::process::Command> {
+pub fn create_dev_command(ctx: &WorkspaceContext, cmd: &str) -> Result<std::process::Command> {
     let interpolated = ctx.interpolate(cmd)?;
     let mut command = if cfg!(windows) {
         let mut c = std::process::Command::new("cmd");
@@ -272,4 +267,3 @@ CUSTOM_VAR = "hello-{{project.name}}"
         assert!(result.is_err());
     }
 }
-

@@ -4,6 +4,7 @@ mod config;
 mod context;
 mod docker;
 mod env_writer;
+mod orchestrators;
 mod services;
 mod supervisor;
 

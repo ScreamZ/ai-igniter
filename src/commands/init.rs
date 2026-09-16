@@ -52,49 +52,35 @@ pub fn execute_init(args: InitArgs) -> Result<()> {
     }
 
     let orchestrator_cfg = if args.non_interactive {
-        OrchestratorConfig {
-            port_env: Some("PASEO_PORT".to_string()),
-            root_env: Some("PASEO_SOURCE_CHECKOUT_PATH".to_string()),
-        }
+        crate::orchestrators::KNOWN_ORCHESTRATORS[0].to_orchestrator_config()
     } else {
-        let orchestrator_options = vec![
-            "Paseo",
-            "Conductor",
-            "Orca",
-            "Custom (specify environment variable names)",
-            "Generic / Fallback (WORKSPACE_*)",
-        ];
+        let mut orchestrator_options: Vec<String> = crate::orchestrators::KNOWN_ORCHESTRATORS
+            .iter()
+            .map(|s| s.name.to_string())
+            .collect();
+        orchestrator_options.push("Custom (specify environment variable names)".to_string());
+        orchestrator_options.push("Generic / Fallback (WORKSPACE_*)".to_string());
+
         let chosen = Select::new("Select orchestrator:", orchestrator_options).prompt()?;
 
-        match chosen {
-            "Paseo" => OrchestratorConfig {
-                port_env: Some("PASEO_PORT".to_string()),
-                root_env: Some("PASEO_SOURCE_CHECKOUT_PATH".to_string()),
-            },
-            "Conductor" => OrchestratorConfig {
-                port_env: Some("CONDUCTOR_PORT".to_string()),
-                root_env: Some("CONDUCTOR_ROOT_PATH".to_string()),
-            },
-            "Orca" => OrchestratorConfig {
-                port_env: Some("ORCA_PORT".to_string()),
-                root_env: Some("ORCA_ROOT_PATH".to_string()),
-            },
-            "Custom (specify environment variable names)" => {
-                let port_var = Text::new("Port env var name:")
-                    .with_initial_value("PORT")
-                    .prompt()?;
-                let root_var = Text::new("Source checkout dir env var name:")
-                    .with_initial_value("WORKSPACE_ROOT_PATH")
-                    .prompt()?;
-                OrchestratorConfig {
-                    port_env: Some(port_var),
-                    root_env: Some(root_var),
-                }
+        if let Some(spec) = crate::orchestrators::find_by_name(&chosen) {
+            spec.to_orchestrator_config()
+        } else if chosen.starts_with("Custom") {
+            let port_var = Text::new("Port env var name:")
+                .with_initial_value("PORT")
+                .prompt()?;
+            let root_var = Text::new("Source checkout dir env var name:")
+                .with_initial_value(crate::orchestrators::GENERIC_ROOT_ENV)
+                .prompt()?;
+            OrchestratorConfig {
+                port_env: Some(port_var),
+                root_env: Some(root_var),
             }
-            _ => OrchestratorConfig {
-                port_env: Some("WORKSPACE_PORT".to_string()),
-                root_env: Some("WORKSPACE_ROOT_PATH".to_string()),
-            },
+        } else {
+            OrchestratorConfig {
+                port_env: Some(crate::orchestrators::GENERIC_PORT_ENV.to_string()),
+                root_env: Some(crate::orchestrators::GENERIC_ROOT_ENV.to_string()),
+            }
         }
     };
 

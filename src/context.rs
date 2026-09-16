@@ -6,17 +6,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Orchestrator variables pointing at the worktree, only consulted when invoked outside any project.
-const WORKSPACE_ENV_VARS: &[&str] = &[
-    "WORKSPACE_PATH",
-    "PASEO_WORKTREE_PATH",
-    "CONDUCTOR_WORKSPACE_PATH",
-    "ORCA_WORKSPACE_PATH",
-];
-
-/// Generic base port variables, consulted after `orchestrator.port_env`.
-const PORT_ENV_VARS: &[&str] = &["WORKSPACE_PORT", "PASEO_PORT", "CONDUCTOR_PORT"];
-
 #[derive(Debug, Clone)]
 pub struct WorkspaceContext {
     pub workspace_path: PathBuf,
@@ -71,7 +60,7 @@ impl WorkspaceContext {
             config_path,
             config,
             base_port,
-            is_local(),
+            crate::orchestrators::check_is_local(),
         )
     }
 
@@ -281,7 +270,7 @@ fn resolve_base_port(cli_port: Option<u16>, config: &Config) -> Result<Option<u1
         .port_env
         .iter()
         .map(String::as_str)
-        .chain(PORT_ENV_VARS.iter().copied());
+        .chain(crate::orchestrators::port_env_vars());
     for name in env_names {
         if let Ok(value) = std::env::var(name) {
             let port = value
@@ -304,9 +293,8 @@ fn locate_workspace(current_dir: &Path) -> PathBuf {
     if let Some(toplevel) = toplevel {
         return toplevel;
     }
-    WORKSPACE_ENV_VARS
-        .iter()
-        .find_map(|name| env_dir(name))
+    crate::orchestrators::workspace_env_vars()
+        .find_map(env_dir)
         .unwrap_or_else(|| current_dir.to_path_buf())
 }
 
@@ -356,14 +344,6 @@ fn git_main_checkout(path: &Path) -> Option<PathBuf> {
         return None; // bare repository
     }
     common_dir.parent().map(Path::to_path_buf)
-}
-
-fn is_local() -> bool {
-    std::env::var("IS_LOCAL")
-        .or_else(|_| std::env::var("PASEO_IS_LOCAL"))
-        .or_else(|_| std::env::var("CONDUCTOR_IS_LOCAL"))
-        .map(|val| val != "0" && val.to_lowercase() != "false")
-        .unwrap_or(true)
 }
 
 #[cfg(test)]
