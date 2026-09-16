@@ -56,6 +56,8 @@ Enable only what your project needs via `ai-igniter.toml`:
 - Preserves all your existing custom variables outside the managed section.
 - One-time seed copying (`copy_files`) from your main repository checkout when creating new worktrees.
 
+> 📖 **Deep Dive:** Want to understand the resolution hierarchy, deterministic port hashing, and anti-hijacking system? Check out the [Workspace Resolution & Port Allocation Guide](file:///Users/screamz/dev-workspace/perso/ai-tools/docs/workspace-resolution.md).
+
 ---
 
 ## 📦 Installation
