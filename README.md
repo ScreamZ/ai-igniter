@@ -12,15 +12,7 @@
 
 <br />
 
-<!-- Replace with actual recording/demo -->
-```
-   ┌─────────────────────────────────────────────────────────────┐
-   │                                                             │
-   │      [ Demo GIF / Terminal Recording Placeholder ]          │
-   │               ./assets/demo.gif                             │
-   │                                                             │
-   └─────────────────────────────────────────────────────────────┘
-```
+![ai-igniter demo](./assets/demo.gif)
 
 </div>
 
