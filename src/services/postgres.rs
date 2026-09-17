@@ -422,7 +422,7 @@ impl PostgresService<'_> {
 
         if already_seeded {
             println!(
-                "{} Database already seeded, skipping seed.",
+                "\n{} Database already seeded, skipping seed.",
                 "[postgres]".blue().bold()
             );
             return Ok(());
