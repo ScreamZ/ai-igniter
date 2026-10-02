@@ -33,7 +33,7 @@ pub struct Config {
     /// Files seeded from the root checkout when a worktree file is absent.
     pub copy_files: Vec<CopyFileRule>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "OrchestratorConfig::is_empty")]
     pub orchestrator: OrchestratorConfig,
 
     #[serde(default)]
@@ -75,7 +75,7 @@ impl<'de> Deserialize<'de> for CopyFileRule {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct OrchestratorConfig {
     /// Env var holding the workspace base port (e.g. PASEO_PORT)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -83,6 +83,31 @@ pub struct OrchestratorConfig {
     /// Env var holding the source checkout path, used to seed `.env` in new worktrees
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root_env: Option<String>,
+}
+
+impl OrchestratorConfig {
+    pub fn is_empty(&self) -> bool {
+        self.port_env.is_none() && self.root_env.is_none()
+    }
+}
+
+/// Recursively merges `overrides` into `base`. Tables are merged recursively; scalar values or arrays in `overrides` replace those in `base`.
+pub fn merge_toml_values(base: &mut toml::Value, overrides: toml::Value) {
+    match (base, overrides) {
+        (toml::Value::Table(base_table), toml::Value::Table(override_table)) => {
+            for (key, val) in override_table {
+                match base_table.get_mut(&key) {
+                    Some(base_val) => merge_toml_values(base_val, val),
+                    None => {
+                        base_table.insert(key, val);
+                    }
+                }
+            }
+        }
+        (base_val, override_val) => {
+            *base_val = override_val;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -123,12 +148,77 @@ impl Config {
         self.env_file.as_path()
     }
 
+    #[allow(dead_code)]
     pub fn load_from_file(path: &Path) -> Result<Self> {
+        Self::load_from_file_with_override(path, None)
+    }
+
+    pub fn load_from_file_with_override(path: &Path, override_path: Option<&Path>) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file at {:?}", path))?;
-        let config: Config = toml::from_str(&content)
+        let mut base_value: toml::Value = toml::from_str(&content)
             .with_context(|| format!("Failed to parse TOML in {:?}", path))?;
+
+        if let Some(ov_path) = override_path {
+            let ov_content = std::fs::read_to_string(ov_path)
+                .with_context(|| format!("Failed to read local override file at {:?}", ov_path))?;
+            let ov_value: toml::Value = toml::from_str(&ov_content)
+                .with_context(|| format!("Failed to parse local TOML override in {:?}", ov_path))?;
+            merge_toml_values(&mut base_value, ov_value);
+        }
+
+        let config: Config = base_value.try_into().with_context(|| {
+            if let Some(ov_path) = override_path {
+                format!(
+                    "Invalid configuration in {:?} after applying local override from {:?}",
+                    path, ov_path
+                )
+            } else {
+                format!("Invalid configuration in {:?}", path)
+            }
+        })?;
         Ok(config)
+    }
+
+    /// Looks for a local override file (`ai-igniter.local.toml` or `.<name>.local.toml`) in the workspace, then in root.
+    pub fn find_local_override(workspace_path: &Path, root_path: &Path) -> Option<PathBuf> {
+        let candidates = [
+            workspace_path.join("ai-igniter.local.toml"),
+            workspace_path.join(".ai-igniter.local.toml"),
+            root_path.join("ai-igniter.local.toml"),
+            root_path.join(".ai-igniter.local.toml"),
+        ];
+
+        for candidate in &candidates {
+            if candidate.exists() {
+                return Some(candidate.clone());
+            }
+        }
+        None
+    }
+
+    /// Finds a local override file for an explicitly passed config path, checking adjacent `.local.toml` first.
+    pub fn find_local_override_for_path(
+        config_path: &Path,
+        workspace_path: &Path,
+        root_path: Option<&Path>,
+    ) -> Option<PathBuf> {
+        if let Some(file_name) = config_path.file_name().and_then(|n| n.to_str()) {
+            let file_stem = config_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(file_name);
+            let local_adjacent = config_path.with_file_name(format!("{file_stem}.local.toml"));
+            if local_adjacent.exists() {
+                return Some(local_adjacent);
+            }
+            let dot_local_adjacent = config_path.with_file_name(format!(".{file_stem}.local.toml"));
+            if dot_local_adjacent.exists() {
+                return Some(dot_local_adjacent);
+            }
+        }
+
+        Self::find_local_override(workspace_path, root_path.unwrap_or(workspace_path))
     }
 
     pub fn find_config(workspace_path: &Path, root_path: &Path) -> Result<(PathBuf, Self)> {
@@ -139,9 +229,11 @@ impl Config {
             root_path.join(format!(".{}", CONFIG_FILE_NAME)),
         ];
 
+        let local_override = Self::find_local_override(workspace_path, root_path);
+
         for candidate in &candidates {
             if candidate.exists() {
-                let cfg = Self::load_from_file(candidate)?;
+                let cfg = Self::load_from_file_with_override(candidate, local_override.as_deref())?;
                 return Ok((candidate.clone(), cfg));
             }
         }
@@ -507,5 +599,74 @@ image = "myimage"
 "#,
         );
         assert!(reserved_name.validate().is_err());
+    }
+
+    #[test]
+    fn test_merge_toml_values() {
+        let base_str = r#"
+name = "base-app"
+env_file = ".env"
+copy_files = []
+base_port = 3000
+
+[orchestrator]
+port_env = "PASEO_PORT"
+root_env = "PASEO_SOURCE_CHECKOUT_PATH"
+
+[env_template]
+VAR_A = "1"
+VAR_B = "2"
+"#;
+        let override_str = r#"
+base_port = 4000
+
+[orchestrator]
+port_env = "ORCA_PORT"
+
+[env_template]
+VAR_B = "overridden"
+VAR_C = "3"
+"#;
+        let mut base_val: toml::Value = toml::from_str(base_str).unwrap();
+        let override_val: toml::Value = toml::from_str(override_str).unwrap();
+        merge_toml_values(&mut base_val, override_val);
+
+        let merged: Config = base_val.try_into().unwrap();
+        assert_eq!(merged.name, "base-app");
+        assert_eq!(merged.base_port, Some(4000));
+        assert_eq!(merged.orchestrator.port_env.as_deref(), Some("ORCA_PORT"));
+        assert_eq!(
+            merged.orchestrator.root_env.as_deref(),
+            Some("PASEO_SOURCE_CHECKOUT_PATH")
+        );
+        assert_eq!(
+            merged.env_template.get("VAR_A").map(|s| s.as_str()),
+            Some("1")
+        );
+        assert_eq!(
+            merged.env_template.get("VAR_B").map(|s| s.as_str()),
+            Some("overridden")
+        );
+        assert_eq!(
+            merged.env_template.get("VAR_C").map(|s| s.as_str()),
+            Some("3")
+        );
+    }
+
+    #[test]
+    fn test_empty_orchestrator_not_serialized() {
+        let config = Config {
+            name: "test-app".to_string(),
+            base_port: None,
+            compose_file: None,
+            dev_command: None,
+            env_file: PathBuf::from(".env"),
+            copy_files: vec![],
+            orchestrator: OrchestratorConfig::default(),
+            services: ServicesConfig::default(),
+            env_template: BTreeMap::new(),
+        };
+        let s = toml::to_string_pretty(&config).unwrap();
+        assert!(!s.contains("[orchestrator]"));
     }
 }

@@ -1,6 +1,7 @@
 use crate::cli::Cli;
 use crate::config::{CONFIG_FILE_NAME, Config, sanitize_name};
 use anyhow::{Context, Result};
+use colored::Colorize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -18,11 +19,19 @@ pub struct WorkspaceContext {
     pub config_path: PathBuf,
     pub config: Config,
     pub port_allocations: BTreeMap<String, u16>,
+    pub warnings: Vec<String>,
 }
 
 impl WorkspaceContext {
+    pub fn print_warnings(&self) {
+        for warning in &self.warnings {
+            eprintln!("{} Warning: {warning}", "[orchestrator]".yellow().bold());
+        }
+    }
+
     pub fn resolve(cli: &Cli) -> Result<Self> {
         let current_dir = std::env::current_dir().context("Failed to get current directory")?;
+        let mut warnings = Vec::new();
 
         // 1. Workspace: --dir, else the enclosing project (never hijacked by external env), else orchestrator env
         let requested = cli
@@ -35,36 +44,54 @@ impl WorkspaceContext {
 
         // 2. Config: workspace first, then the main checkout (worktrees may not carry an untracked config)
         let (config_path, config) = match &cli.config {
-            Some(path) => (path.clone(), Config::load_from_file(path)?),
+            Some(path) => {
+                let local_path = Config::find_local_override_for_path(
+                    path,
+                    &workspace_path,
+                    main_checkout.as_deref(),
+                );
+                (
+                    path.clone(),
+                    Config::load_from_file_with_override(path, local_path.as_deref())?,
+                )
+            }
             None => Config::find_config(
                 &workspace_path,
                 main_checkout.as_deref().unwrap_or(&workspace_path),
             )?,
         };
 
-        // 3. Root: --root, else $<orchestrator.root_env>, else the main git checkout
-        let root_path = cli
-            .root
-            .clone()
-            .or_else(|| env_dir(config.orchestrator.root_env.as_deref()?))
-            .or(main_checkout)
-            .unwrap_or_else(|| workspace_path.clone());
-        // Compare physical paths when deciding whether a worktree needs seeding. This also
-        // handles `--root .` and symlinked root checkouts when the workspace is canonical.
-        let root_path = std::fs::canonicalize(&root_path).unwrap_or(root_path);
+        // 3. Root: --root, else $<orchestrator.root_env>, else $<orchestrators::root_env_vars>, else the main git checkout
+        let (root_path, root_warning) = resolve_root_path(
+            cli.root.as_deref(),
+            &config,
+            main_checkout.as_deref(),
+            &workspace_path,
+        );
+        if let Some(w) = root_warning {
+            warnings.push(w);
+        }
 
-        let base_port = resolve_base_port(cli.port, &config)?;
-        Self::from_parts(
+        let digest = Sha256::digest(workspace_path.to_string_lossy().as_bytes());
+        let derived_port = derived_base_port(&digest);
+        let (base_port, port_warning) = resolve_base_port(cli.port, &config, derived_port)?;
+        if let Some(w) = port_warning {
+            warnings.push(w);
+        }
+
+        Self::from_parts_with_warnings(
             workspace_path,
             root_path,
             config_path,
             config,
-            base_port,
+            Some(base_port),
             crate::orchestrators::check_is_local(),
+            warnings,
         )
     }
 
     /// Builds the context from resolved paths; a missing `base_port` is derived from the workspace path.
+    #[allow(dead_code)]
     pub fn from_parts(
         workspace_path: PathBuf,
         root_path: PathBuf,
@@ -72,6 +99,26 @@ impl WorkspaceContext {
         config: Config,
         base_port: Option<u16>,
         is_local: bool,
+    ) -> Result<Self> {
+        Self::from_parts_with_warnings(
+            workspace_path,
+            root_path,
+            config_path,
+            config,
+            base_port,
+            is_local,
+            Vec::new(),
+        )
+    }
+
+    pub fn from_parts_with_warnings(
+        workspace_path: PathBuf,
+        root_path: PathBuf,
+        config_path: PathBuf,
+        config: Config,
+        base_port: Option<u16>,
+        is_local: bool,
+        warnings: Vec<String>,
     ) -> Result<Self> {
         config
             .validate()
@@ -100,6 +147,7 @@ impl WorkspaceContext {
             config_path,
             config,
             port_allocations,
+            warnings,
         })
     }
 
@@ -261,26 +309,104 @@ fn allocate_ports(config: &Config, base_port: u16) -> Result<BTreeMap<String, u1
     Ok(ports)
 }
 
-fn resolve_base_port(cli_port: Option<u16>, config: &Config) -> Result<Option<u16>> {
-    if cli_port.is_some() {
-        return Ok(cli_port);
+fn resolve_base_port(
+    cli_port: Option<u16>,
+    config: &Config,
+    derived_port: u16,
+) -> Result<(u16, Option<String>)> {
+    if let Some(port) = cli_port {
+        return Ok((port, None));
     }
-    let env_names = config
-        .orchestrator
-        .port_env
-        .iter()
-        .map(String::as_str)
-        .chain(crate::orchestrators::port_env_vars());
-    for name in env_names {
-        if let Ok(value) = std::env::var(name) {
+
+    let mut candidate_env_vars = Vec::new();
+    if let Some(ref env_name) = config.orchestrator.port_env {
+        candidate_env_vars.push(env_name.as_str());
+    }
+    for env_name in crate::orchestrators::port_env_vars() {
+        if !candidate_env_vars.contains(&env_name) {
+            candidate_env_vars.push(env_name);
+        }
+    }
+
+    for env_name in &candidate_env_vars {
+        if let Ok(value) = std::env::var(env_name) {
             let port = value
                 .trim()
                 .parse::<u16>()
-                .with_context(|| format!("${name}={value:?} is not a valid port"))?;
-            return Ok(Some(port));
+                .with_context(|| format!("${env_name}={value:?} is not a valid port"))?;
+            return Ok((port, None));
         }
     }
-    Ok(config.base_port)
+
+    let (chosen_port, fallback_desc) = match config.base_port {
+        Some(port) => (port, format!("configured base_port ({port})")),
+        None => (derived_port, format!("derived port ({derived_port})")),
+    };
+
+    let tested_str = candidate_env_vars
+        .iter()
+        .map(|v| format!("${v}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let warning = format!(
+        "No orchestrator port variable found in environment (tested: {tested_str}).\n  Falling back to {fallback_desc}.\n  To configure a fallback: define one of these environment variables, pass `--port <PORT>`, or set `base_port` in ai-igniter.toml (or ai-igniter.local.toml)."
+    );
+
+    Ok((chosen_port, Some(warning)))
+}
+
+fn resolve_root_path(
+    cli_root: Option<&Path>,
+    config: &Config,
+    main_checkout: Option<&Path>,
+    workspace_path: &Path,
+) -> (PathBuf, Option<String>) {
+    if let Some(explicit) = cli_root {
+        let p = std::fs::canonicalize(explicit).unwrap_or_else(|_| explicit.to_path_buf());
+        return (p, None);
+    }
+
+    let mut candidate_env_vars = Vec::new();
+    if let Some(ref env_name) = config.orchestrator.root_env {
+        candidate_env_vars.push(env_name.as_str());
+    }
+    for env_name in crate::orchestrators::root_env_vars() {
+        if !candidate_env_vars.contains(&env_name) {
+            candidate_env_vars.push(env_name);
+        }
+    }
+
+    for env_name in &candidate_env_vars {
+        if let Some(dir) = env_dir(env_name) {
+            let p = std::fs::canonicalize(&dir).unwrap_or(dir);
+            return (p, None);
+        }
+    }
+
+    let (fallback_path, fallback_desc) = match main_checkout {
+        Some(main) => (
+            main.to_path_buf(),
+            format!("git main checkout ({})", main.display()),
+        ),
+        None => (
+            workspace_path.to_path_buf(),
+            format!("workspace directory ({})", workspace_path.display()),
+        ),
+    };
+
+    let tested_str = candidate_env_vars
+        .iter()
+        .map(|v| format!("${v}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let warning = format!(
+        "No orchestrator root directory variable found in environment (tested: {tested_str}).\n  Falling back to {fallback_desc}.\n  To configure a fallback: define one of these environment variables, pass `--root <PATH>`, or set `[orchestrator].root_env` in ai-igniter.toml (or ai-igniter.local.toml)."
+    );
+
+    let p = std::fs::canonicalize(&fallback_path).unwrap_or(fallback_path);
+    (p, Some(warning))
 }
 
 fn locate_workspace(current_dir: &Path) -> PathBuf {
@@ -349,6 +475,7 @@ fn git_main_checkout(path: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use crate::config::OrchestratorConfig;
 
     pub fn test_ctx(config_toml: &str, base_port: Option<u16>) -> WorkspaceContext {
         let mut prefix = String::new();
@@ -504,5 +631,97 @@ neon_proxy = true
         )
         .unwrap_err();
         assert_eq!(err, ["services.unknown.port", "ports.base + 70000"]);
+    }
+
+    #[test]
+    fn find_config_merges_local_override_file() {
+        let temp =
+            std::env::temp_dir().join(format!("ai-igniter-override-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+
+        let base_toml = r#"
+name = "base-app"
+env_file = ".env"
+copy_files = []
+base_port = 3000
+
+[orchestrator]
+port_env = "PASEO_PORT"
+"#;
+        let local_toml = r#"
+base_port = 4500
+
+[orchestrator]
+port_env = "ORCA_PORT"
+"#;
+        std::fs::write(temp.join("ai-igniter.toml"), base_toml).unwrap();
+        std::fs::write(temp.join("ai-igniter.local.toml"), local_toml).unwrap();
+
+        let (loaded_path, config) = Config::find_config(&temp, &temp).unwrap();
+        assert_eq!(loaded_path, temp.join("ai-igniter.toml"));
+        assert_eq!(config.base_port, Some(4500));
+        assert_eq!(config.orchestrator.port_env.as_deref(), Some("ORCA_PORT"));
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn resolve_base_port_warning_shows_tested_vars() {
+        let config = Config {
+            name: "test-app".to_string(),
+            base_port: None,
+            compose_file: None,
+            dev_command: None,
+            env_file: PathBuf::from(".env"),
+            copy_files: vec![],
+            orchestrator: OrchestratorConfig::default(),
+            services: Default::default(),
+            env_template: Default::default(),
+        };
+
+        // When no env var is set, warning is emitted listing the tested variables
+        let (port, warning) = resolve_base_port(None, &config, 24000).unwrap();
+        assert_eq!(port, 24000);
+        assert!(warning.is_some());
+        let w = warning.unwrap();
+        assert!(w.contains("No orchestrator port variable found"));
+        assert!(w.contains("$WORKSPACE_PORT"));
+        assert!(w.contains("$PASEO_PORT"));
+        assert!(w.contains("$CONDUCTOR_PORT"));
+        assert!(w.contains("$ORCA_PORT"));
+        assert!(w.contains("derived port (24000)"));
+
+        // When CLI port is explicit, no warning is emitted
+        let (port_cli, warning_cli) = resolve_base_port(Some(3000), &config, 24000).unwrap();
+        assert_eq!(port_cli, 3000);
+        assert!(warning_cli.is_none());
+    }
+
+    #[test]
+    fn resolve_root_path_warning_shows_tested_vars() {
+        let config = Config {
+            name: "test-app".to_string(),
+            base_port: None,
+            compose_file: None,
+            dev_command: None,
+            env_file: PathBuf::from(".env"),
+            copy_files: vec![],
+            orchestrator: OrchestratorConfig::default(),
+            services: Default::default(),
+            env_template: Default::default(),
+        };
+
+        let ws = Path::new("/tmp/test-workspace");
+        let (root, warning) = resolve_root_path(None, &config, None, ws);
+        assert_eq!(root, ws);
+        assert!(warning.is_some());
+        let w = warning.unwrap();
+        assert!(w.contains("No orchestrator root directory variable found"));
+        assert!(w.contains("$WORKSPACE_ROOT_PATH"));
+        assert!(w.contains("$PASEO_SOURCE_CHECKOUT_PATH"));
+        assert!(w.contains("$CONDUCTOR_ROOT_PATH"));
+        assert!(w.contains("$ORCA_ROOT_PATH"));
+        assert!(w.contains("workspace directory"));
     }
 }

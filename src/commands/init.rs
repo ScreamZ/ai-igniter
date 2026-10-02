@@ -52,18 +52,23 @@ pub fn execute_init(args: InitArgs) -> Result<()> {
     }
 
     let orchestrator_cfg = if args.non_interactive {
-        crate::orchestrators::KNOWN_ORCHESTRATORS[0].to_orchestrator_config()
+        OrchestratorConfig::default()
     } else {
-        let mut orchestrator_options: Vec<String> = crate::orchestrators::KNOWN_ORCHESTRATORS
-            .iter()
-            .map(|s| s.name.to_string())
-            .collect();
+        let mut orchestrator_options: Vec<String> =
+            vec!["Auto-detect / Multi-orchestrator (Paseo, Orca, Conductor)".to_string()];
+        orchestrator_options.extend(
+            crate::orchestrators::KNOWN_ORCHESTRATORS
+                .iter()
+                .map(|s| s.name.to_string()),
+        );
         orchestrator_options.push("Custom (specify environment variable names)".to_string());
         orchestrator_options.push("Generic / Fallback (WORKSPACE_*)".to_string());
 
         let chosen = Select::new("Select orchestrator:", orchestrator_options).prompt()?;
 
-        if let Some(spec) = crate::orchestrators::find_by_name(&chosen) {
+        if chosen.starts_with("Auto-detect") {
+            OrchestratorConfig::default()
+        } else if let Some(spec) = crate::orchestrators::find_by_name(&chosen) {
             spec.to_orchestrator_config()
         } else if chosen.starts_with("Custom") {
             let port_var = Text::new("Port env var name:")
@@ -167,6 +172,7 @@ pub fn execute_init(args: InitArgs) -> Result<()> {
     fs::write(&target_file, toml_str)
         .with_context(|| format!("Failed to write {:?}", target_file))?;
     ensure_gitignored(&cwd, ".igniter/")?;
+    ensure_gitignored(&cwd, "*.local.toml")?;
 
     println!();
     println!(

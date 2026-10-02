@@ -67,6 +67,11 @@ pub fn port_env_vars<'a>() -> impl Iterator<Item = &'a str> {
     std::iter::once(GENERIC_PORT_ENV).chain(KNOWN_ORCHESTRATORS.iter().map(|s| s.port_env))
 }
 
+/// Returns all candidate generic and known orchestrator environment variable names for root source directory fallback.
+pub fn root_env_vars<'a>() -> impl Iterator<Item = &'a str> {
+    std::iter::once(GENERIC_ROOT_ENV).chain(KNOWN_ORCHESTRATORS.iter().filter_map(|s| s.root_env))
+}
+
 /// Returns true if execution is determined to be local (defaults to true if unset).
 /// Checked against `IS_LOCAL` first, then each orchestrator's specific `is_local_env`.
 pub fn check_is_local() -> bool {
@@ -131,6 +136,12 @@ mod tests {
         assert!(port_vars.contains(&"PASEO_PORT"));
         assert!(port_vars.contains(&"CONDUCTOR_PORT"));
         assert!(port_vars.contains(&"ORCA_PORT"));
+
+        let root_vars: Vec<&str> = root_env_vars().collect();
+        assert_eq!(root_vars[0], GENERIC_ROOT_ENV);
+        assert!(root_vars.contains(&"PASEO_SOURCE_CHECKOUT_PATH"));
+        assert!(root_vars.contains(&"CONDUCTOR_ROOT_PATH"));
+        assert!(root_vars.contains(&"ORCA_ROOT_PATH"));
     }
 
     #[test]

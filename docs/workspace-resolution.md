@@ -40,6 +40,19 @@ flowchart TD
 3. **Orchestrator Environment Variables**:
    - If invoked from outside any git repository, it checks `WORKSPACE_PATH`, `PASEO_WORKTREE_PATH`, `CONDUCTOR_WORKSPACE_PATH`, or `ORCA_WORKSPACE_PATH`.
 
+### Root Path Resolution Order
+1. `--root <PATH>` CLI override
+2. `[orchestrator].root_env` if defined in config and present in the environment
+3. Auto-detected orchestrator environment variables: `$WORKSPACE_ROOT_PATH`, `$PASEO_SOURCE_CHECKOUT_PATH`, `$CONDUCTOR_ROOT_PATH`, `$ORCA_ROOT_PATH`
+4. Git main checkout (`git rev-parse --git-common-dir`)
+5. Fallback to `workspace_path`
+
+### Local Overrides (`ai-igniter.local.toml`)
+To support mixed teams where different developers use different tools (Paseo, Orca, Conductor) or need machine-specific port / dev command settings without dirtying git:
+- `ai-igniter` automatically loads and deep-merges `ai-igniter.local.toml` (or `.ai-igniter.local.toml`) if present.
+- It checks the workspace directory first, then the root checkout directory.
+- `ai-igniter init` automatically ensures `*.local.toml` is added to `.gitignore`.
+
 ### 🛡️ Anti-Hijacking Protection
 When working with AI agents or multiple terminal sessions, environment variables (like `PASEO_WORKTREE_PATH`) often leak across processes.
 `ai-igniter` **never allows environment variables to hijack a command run inside a git repository**. Local filesystem context always takes precedence.
@@ -73,9 +86,9 @@ The primary application port (`{{ports.base}}`) is resolved using the following 
 | Priority | Source | Description |
 | :--- | :--- | :--- |
 | **1** | `--port <PORT>` | Explicit CLI override |
-| **2** | `[orchestrator].port_env` | Environment variable declared in TOML (e.g., `PASEO_PORT`) |
-| **3** | Generic Env Vars | `$WORKSPACE_PORT`, `$PASEO_PORT`, `$CONDUCTOR_PORT` |
-| **4** | `base_port` (in TOML) | Optional fixed port in `ai-igniter.toml` |
+| **2** | `[orchestrator].port_env` | Environment variable declared in TOML (e.g., `PASEO_PORT`, `ORCA_PORT`) |
+| **3** | Auto-Detect Env Vars | `$WORKSPACE_PORT`, `$PASEO_PORT`, `$CONDUCTOR_PORT`, `$ORCA_PORT` |
+| **4** | `base_port` (in TOML) | Optional fixed port in `ai-igniter.toml` or `ai-igniter.local.toml` |
 | **5** | **Path-derived Hash** | **Default:** Deterministic port in range `20000..=59980` in steps of 20 |
 
 ### Deterministic Port Derivation (Standalone Mode)

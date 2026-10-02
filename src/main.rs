@@ -38,6 +38,7 @@ fn run(cli: Cli) -> Result<()> {
     let _update_guard = commands::spawn_background_update_checker();
 
     let ctx = WorkspaceContext::resolve(&cli).context("Failed to resolve workspace context")?;
+    ctx.print_warnings();
 
     // If not local execution (e.g. running inside a cloud orchestrator sandbox), skip local Docker services
     if !ctx.is_local {
