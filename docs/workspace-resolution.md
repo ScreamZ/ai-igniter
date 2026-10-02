@@ -38,7 +38,7 @@ flowchart TD
    - It runs `git rev-parse --git-common-dir` to identify the **main checkout** of the repository.
    - It looks for `ai-igniter.toml` inside the worktree; if not present (e.g. untracked branch), it automatically falls back to reading it from the main checkout!
 3. **Orchestrator Environment Variables**:
-   - If invoked from outside any git repository, it checks `WORKSPACE_PATH`, `PASEO_WORKTREE_PATH`, `CONDUCTOR_WORKSPACE_PATH`, or `ORCA_WORKSPACE_PATH`.
+   - If invoked from outside any git repository, it checks `WORKSPACE_PATH`, `PASEO_WORKTREE_PATH`, `CONDUCTOR_WORKSPACE_PATH`, or `ORCA_WORKTREE_PATH`.
 
 ### Root Path Resolution Order
 1. `--root <PATH>` CLI override
@@ -86,8 +86,8 @@ The primary application port (`{{ports.base}}`) is resolved using the following 
 | Priority | Source | Description |
 | :--- | :--- | :--- |
 | **1** | `--port <PORT>` | Explicit CLI override |
-| **2** | `[orchestrator].port_env` | Environment variable declared in TOML (e.g., `PASEO_PORT`, `ORCA_PORT`) |
-| **3** | Auto-Detect Env Vars | `$WORKSPACE_PORT`, `$PASEO_PORT`, `$CONDUCTOR_PORT`, `$ORCA_PORT` |
+| **2** | `[orchestrator].port_env` | Environment variable declared in TOML (e.g., `PASEO_PORT`, `CONDUCTOR_PORT`) |
+| **3** | Auto-Detect Env Vars | `$WORKSPACE_PORT`, `$PASEO_PORT`, `$CONDUCTOR_PORT` |
 | **4** | `base_port` (in TOML) | Optional fixed port in `ai-igniter.toml` or `ai-igniter.local.toml` |
 | **5** | **Path-derived Hash** | **Default:** Deterministic port in range `20000..=59980` in steps of 20 |
 

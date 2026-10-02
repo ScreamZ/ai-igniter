@@ -8,7 +8,7 @@ use std::path::PathBuf;
     version
 )]
 pub struct Cli {
-    /// Workspace / Worktree directory (defaults to the enclosing project, then $WORKSPACE_PATH, $PASEO_WORKTREE_PATH, $CONDUCTOR_WORKSPACE_PATH, $ORCA_WORKSPACE_PATH)
+    /// Workspace / Worktree directory (defaults to the enclosing project, then $WORKSPACE_PATH, $PASEO_WORKTREE_PATH, $CONDUCTOR_WORKSPACE_PATH, $ORCA_WORKTREE_PATH)
     #[arg(short, long, global = true)]
     pub dir: Option<PathBuf>,
 

@@ -7,8 +7,8 @@ pub struct OrchestratorSpec {
     pub name: &'static str,
     /// Environment variable pointing at the worktree/workspace path.
     pub workspace_env: &'static str,
-    /// Environment variable pointing at the workspace base port.
-    pub port_env: &'static str,
+    /// Environment variable pointing at the workspace base port (if managed by the orchestrator).
+    pub port_env: Option<&'static str>,
     /// Environment variable pointing at the main source checkout path (if applicable).
     pub root_env: Option<&'static str>,
     /// Environment variable indicating whether execution is local vs in a cloud sandbox.
@@ -19,7 +19,7 @@ impl OrchestratorSpec {
     /// Converts this specification into an `OrchestratorConfig` as saved in `igniter.toml`.
     pub fn to_orchestrator_config(self) -> OrchestratorConfig {
         OrchestratorConfig {
-            port_env: Some(self.port_env.to_string()),
+            port_env: self.port_env.map(|s| s.to_string()),
             root_env: self.root_env.map(|s| s.to_string()),
         }
     }
@@ -30,21 +30,21 @@ pub const KNOWN_ORCHESTRATORS: &[OrchestratorSpec] = &[
     OrchestratorSpec {
         name: "Paseo",
         workspace_env: "PASEO_WORKTREE_PATH",
-        port_env: "PASEO_PORT",
+        port_env: Some("PASEO_PORT"),
         root_env: Some("PASEO_SOURCE_CHECKOUT_PATH"),
         is_local_env: Some("PASEO_IS_LOCAL"),
     },
     OrchestratorSpec {
         name: "Conductor",
         workspace_env: "CONDUCTOR_WORKSPACE_PATH",
-        port_env: "CONDUCTOR_PORT",
+        port_env: Some("CONDUCTOR_PORT"),
         root_env: Some("CONDUCTOR_ROOT_PATH"),
         is_local_env: Some("CONDUCTOR_IS_LOCAL"),
     },
     OrchestratorSpec {
         name: "Orca",
-        workspace_env: "ORCA_WORKSPACE_PATH",
-        port_env: "ORCA_PORT",
+        workspace_env: "ORCA_WORKTREE_PATH",
+        port_env: None,
         root_env: Some("ORCA_ROOT_PATH"),
         is_local_env: None,
     },
@@ -64,7 +64,7 @@ pub fn workspace_env_vars<'a>() -> impl Iterator<Item = &'a str> {
 
 /// Returns all candidate generic and known orchestrator environment variable names for base port fallback.
 pub fn port_env_vars<'a>() -> impl Iterator<Item = &'a str> {
-    std::iter::once(GENERIC_PORT_ENV).chain(KNOWN_ORCHESTRATORS.iter().map(|s| s.port_env))
+    std::iter::once(GENERIC_PORT_ENV).chain(KNOWN_ORCHESTRATORS.iter().filter_map(|s| s.port_env))
 }
 
 /// Returns all candidate generic and known orchestrator environment variable names for root source directory fallback.
@@ -110,13 +110,17 @@ mod tests {
     fn test_known_orchestrators_lookups() {
         let paseo = find_by_name("Paseo").expect("Paseo should be found");
         assert_eq!(paseo.workspace_env, "PASEO_WORKTREE_PATH");
-        assert_eq!(paseo.port_env, "PASEO_PORT");
+        assert_eq!(paseo.port_env, Some("PASEO_PORT"));
         assert_eq!(paseo.root_env, Some("PASEO_SOURCE_CHECKOUT_PATH"));
         assert_eq!(paseo.is_local_env, Some("PASEO_IS_LOCAL"));
 
         let cfg = paseo.to_orchestrator_config();
         assert_eq!(cfg.port_env.as_deref(), Some("PASEO_PORT"));
         assert_eq!(cfg.root_env.as_deref(), Some("PASEO_SOURCE_CHECKOUT_PATH"));
+
+        let orca = find_by_name("orca").expect("Orca should be found");
+        assert_eq!(orca.port_env, None);
+        assert_eq!(orca.to_orchestrator_config().port_env, None);
 
         assert!(find_by_name("conductor").is_some());
         assert!(find_by_name("ORCA").is_some());
@@ -129,13 +133,13 @@ mod tests {
         assert_eq!(ws_vars[0], GENERIC_WORKSPACE_ENV);
         assert!(ws_vars.contains(&"PASEO_WORKTREE_PATH"));
         assert!(ws_vars.contains(&"CONDUCTOR_WORKSPACE_PATH"));
-        assert!(ws_vars.contains(&"ORCA_WORKSPACE_PATH"));
+        assert!(ws_vars.contains(&"ORCA_WORKTREE_PATH"));
 
         let port_vars: Vec<&str> = port_env_vars().collect();
         assert_eq!(port_vars[0], GENERIC_PORT_ENV);
         assert!(port_vars.contains(&"PASEO_PORT"));
         assert!(port_vars.contains(&"CONDUCTOR_PORT"));
-        assert!(port_vars.contains(&"ORCA_PORT"));
+        assert!(!port_vars.contains(&"ORCA_PORT"));
 
         let root_vars: Vec<&str> = root_env_vars().collect();
         assert_eq!(root_vars[0], GENERIC_ROOT_ENV);

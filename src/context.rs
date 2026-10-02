@@ -126,10 +126,17 @@ impl WorkspaceContext {
 
         let digest = Sha256::digest(workspace_path.to_string_lossy().as_bytes());
         let hash = hex::encode(&digest[..4]);
-        let slug = workspace_path
-            .file_name()
-            .map(|n| sanitize_name(&n.to_string_lossy()))
+        let slug = std::env::var("ORCA_WORKSPACE_NAME")
+            .ok()
+            .or_else(|| std::env::var("WORKSPACE_NAME").ok())
+            .map(|n| sanitize_name(&n))
             .filter(|s| !s.is_empty())
+            .or_else(|| {
+                workspace_path
+                    .file_name()
+                    .map(|n| sanitize_name(&n.to_string_lossy()))
+                    .filter(|s| !s.is_empty())
+            })
             .unwrap_or_else(|| "workspace".to_string());
         let compose_project = format!("{}-{}-{}", sanitize_name(&config.name), slug, hash);
 
@@ -338,22 +345,25 @@ fn resolve_base_port(
         }
     }
 
-    let (chosen_port, fallback_desc) = match config.base_port {
-        Some(port) => (port, format!("configured base_port ({port})")),
-        None => (derived_port, format!("derived port ({derived_port})")),
+    let chosen_port = config.base_port.unwrap_or(derived_port);
+    let warning = if config.orchestrator.port_env.is_some() {
+        let tested_str = candidate_env_vars
+            .iter()
+            .map(|v| format!("${v}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let fallback_desc = match config.base_port {
+            Some(port) => format!("configured base_port ({port})"),
+            None => format!("derived port ({derived_port})"),
+        };
+        Some(format!(
+            "No orchestrator port variable found in environment (tested: {tested_str}).\n  Falling back to {fallback_desc}.\n  To configure a fallback: define one of these environment variables, pass `--port <PORT>`, or set `base_port` in ai-igniter.toml (or ai-igniter.local.toml)."
+        ))
+    } else {
+        None
     };
 
-    let tested_str = candidate_env_vars
-        .iter()
-        .map(|v| format!("${v}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let warning = format!(
-        "No orchestrator port variable found in environment (tested: {tested_str}).\n  Falling back to {fallback_desc}.\n  To configure a fallback: define one of these environment variables, pass `--port <PORT>`, or set `base_port` in ai-igniter.toml (or ai-igniter.local.toml)."
-    );
-
-    Ok((chosen_port, Some(warning)))
+    Ok((chosen_port, warning))
 }
 
 fn resolve_root_path(
@@ -384,29 +394,24 @@ fn resolve_root_path(
         }
     }
 
-    let (fallback_path, fallback_desc) = match main_checkout {
-        Some(main) => (
-            main.to_path_buf(),
-            format!("git main checkout ({})", main.display()),
-        ),
-        None => (
-            workspace_path.to_path_buf(),
-            format!("workspace directory ({})", workspace_path.display()),
-        ),
+    let (fallback_path, warning) = match main_checkout {
+        Some(main) => (main.to_path_buf(), None),
+        None => {
+            let tested_str = candidate_env_vars
+                .iter()
+                .map(|v| format!("${v}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let warning = format!(
+                "No orchestrator root directory variable found in environment (tested: {tested_str}).\n  Falling back to workspace directory ({}).\n  To configure a fallback: define one of these environment variables, pass `--root <PATH>`, or set `[orchestrator].root_env` in ai-igniter.toml (or ai-igniter.local.toml).",
+                workspace_path.display()
+            );
+            (workspace_path.to_path_buf(), Some(warning))
+        }
     };
 
-    let tested_str = candidate_env_vars
-        .iter()
-        .map(|v| format!("${v}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let warning = format!(
-        "No orchestrator root directory variable found in environment (tested: {tested_str}).\n  Falling back to {fallback_desc}.\n  To configure a fallback: define one of these environment variables, pass `--root <PATH>`, or set `[orchestrator].root_env` in ai-igniter.toml (or ai-igniter.local.toml)."
-    );
-
     let p = std::fs::canonicalize(&fallback_path).unwrap_or(fallback_path);
-    (p, Some(warning))
+    (p, warning)
 }
 
 fn locate_workspace(current_dir: &Path) -> PathBuf {
@@ -668,7 +673,7 @@ port_env = "ORCA_PORT"
 
     #[test]
     fn resolve_base_port_warning_shows_tested_vars() {
-        let config = Config {
+        let mut config = Config {
             name: "test-app".to_string(),
             base_port: None,
             compose_file: None,
@@ -680,16 +685,22 @@ port_env = "ORCA_PORT"
             env_template: Default::default(),
         };
 
-        // When no env var is set, warning is emitted listing the tested variables
+        // When orchestrator.port_env is unset, derived port is quietly used (no warning)
+        let (port, warning) = resolve_base_port(None, &config, 24000).unwrap();
+        assert_eq!(port, 24000);
+        assert!(warning.is_none());
+
+        // When orchestrator.port_env is specified and missing in env, warning is emitted listing the tested variables
+        config.orchestrator.port_env = Some("CUSTOM_PORT".to_string());
         let (port, warning) = resolve_base_port(None, &config, 24000).unwrap();
         assert_eq!(port, 24000);
         assert!(warning.is_some());
         let w = warning.unwrap();
         assert!(w.contains("No orchestrator port variable found"));
+        assert!(w.contains("$CUSTOM_PORT"));
         assert!(w.contains("$WORKSPACE_PORT"));
         assert!(w.contains("$PASEO_PORT"));
         assert!(w.contains("$CONDUCTOR_PORT"));
-        assert!(w.contains("$ORCA_PORT"));
         assert!(w.contains("derived port (24000)"));
 
         // When CLI port is explicit, no warning is emitted
@@ -713,6 +724,14 @@ port_env = "ORCA_PORT"
         };
 
         let ws = Path::new("/tmp/test-workspace");
+        let main = Path::new("/tmp/main-checkout");
+
+        // When main checkout is found by git, no warning is needed
+        let (root_main, warning_main) = resolve_root_path(None, &config, Some(main), ws);
+        assert_eq!(root_main, main);
+        assert!(warning_main.is_none());
+
+        // When main checkout is not found and no env var exists, warns when falling back to workspace directory
         let (root, warning) = resolve_root_path(None, &config, None, ws);
         assert_eq!(root, ws);
         assert!(warning.is_some());

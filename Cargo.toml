@@ -1,6 +1,6 @@
 [package]
 name = "ai-igniter"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 authors = ["ScreamZ"]
 description = "Lightning-fast standalone workspace & service orchestrator for AI worktrees and parallel development"
