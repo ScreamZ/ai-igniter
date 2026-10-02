@@ -4,7 +4,7 @@
 
 **Stop fighting port conflicts across git worktrees. Start coding.**
 
-*Lightning-fast, standalone workspace & service orchestrator for AI worktrees and parallel development (Cursor, Paseo, Conductor, Orca, and CLI).*
+*Lightning-fast, standalone workspace & service orchestrator for AI worktrees and parallel development.*
 
 [![Crates.io](https://img.shields.io/crates/v/ai-igniter.svg?style=flat-square&logo=rust)](https://crates.io/crates/ai-igniter)
 [![Rust](https://img.shields.io/badge/built_with-Rust-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org/)
@@ -21,7 +21,7 @@
 
 ## 💡 Why ai-igniter?
 
-When using **AI coding agents** (Cursor Agent, Claude Code, Paseo, Conductor) or working across **multiple Git worktrees** in parallel, your local development quickly breaks:
+When using **AI coding agents** (Cursor Agent, Claude Code, Aider) or working across **multiple Git worktrees** in parallel, your local development quickly breaks:
 
 - 💥 **Port Conflicts:** Multiple branches try to bind to `3000`, `5432`, or `9000` simultaneously.
 - 🤯 **Dirty `.env` Files:** Manual updates of database URLs and credentials per worktree are fragile and tedious.
@@ -34,9 +34,9 @@ When using **AI coding agents** (Cursor Agent, Claude Code, Paseo, Conductor) or
 ## 🏛️ The Three Pillars
 
 ### 1. 🚦 Automatic Port Resolution & Isolation
-- **Dynamic Port Mapping:** Every worktree gets its own isolated port space derived from its path or provided by an orchestrator (`Paseo`, `Conductor`, etc.).
+- **Dynamic Port Mapping:** Every worktree gets its own isolated port space (deterministic base port for stable URLs/cookies + dynamic OS allocation if ports are squatted).
 - **Safe Port Reclaiming:** Ports held by inactive `ai-igniter` containers are automatically freed without losing your volumes. Containers from external tools are left untouched.
-- **Anti-Hijacking Resolution:** Strict directory and worktree resolution guarantees commands *never* accidentally target another project's worktree.
+- **Git-Native Resolution:** Strict git worktree resolution guarantees commands *never* accidentally target another project's worktree.
 
 ### 2. 🧱 Zero-Config "À la Carte" Services
 Enable only what your project needs via `ai-igniter.toml`:
@@ -120,7 +120,7 @@ Run the interactive wizard in your repository root:
 ai-igniter init
 ```
 
-This guides you through selecting your orchestrator, configuring services (PostgreSQL, S3), and creates an `ai-igniter.toml` configuration file.
+This guides you through configuring services (PostgreSQL, S3), and creates an `ai-igniter.toml` configuration file.
 
 ### 2. Start developing
 
@@ -179,11 +179,6 @@ copy_files = []                            # Files to seed from root checkout on
 dev_command = "bun run dev"                # Command executed after services are healthy
 # base_port = 3000                         # Optional fixed base port
 # compose_file = "docker-compose.dev.yml"  # Optional: use custom compose file
-
-# Orchestrator environment variable hooks
-[orchestrator]
-port_env = "PASEO_PORT"
-root_env = "PASEO_SOURCE_CHECKOUT_PATH"
 
 # Built-in PostgreSQL
 [services.postgres]

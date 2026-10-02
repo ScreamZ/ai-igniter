@@ -15,7 +15,7 @@ pub const CONFIG_FILE_NAME: &str = "ai-igniter.toml";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub name: String,
-    /// Fixed base port. When unset and no orchestrator port is provided, it is derived from the workspace path.
+    /// Fixed base port. When unset, it is derived from the workspace path hash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_port: Option<u16>,
 
@@ -32,9 +32,6 @@ pub struct Config {
 
     /// Files seeded from the root checkout when a worktree file is absent.
     pub copy_files: Vec<CopyFileRule>,
-
-    #[serde(default, skip_serializing_if = "OrchestratorConfig::is_empty")]
-    pub orchestrator: OrchestratorConfig,
 
     #[serde(default)]
     pub services: ServicesConfig,
@@ -72,22 +69,6 @@ impl<'de> Deserialize<'de> for CopyFileRule {
             }),
             Rule::Rename { from, to } => Ok(Self { from, to }),
         }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub struct OrchestratorConfig {
-    /// Env var holding the workspace base port (e.g. PASEO_PORT)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub port_env: Option<String>,
-    /// Env var holding the source checkout path, used to seed `.env` in new worktrees
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub root_env: Option<String>,
-}
-
-impl OrchestratorConfig {
-    pub fn is_empty(&self) -> bool {
-        self.port_env.is_none() && self.root_env.is_none()
     }
 }
 
@@ -489,11 +470,11 @@ copy_files = [
     }
 
     #[test]
-    fn legacy_workspace_env_is_ignored() {
+    fn unknown_sections_are_ignored() {
         let config = parse(
             "name = \"p\"\n[orchestrator]\nport_env = \"PASEO_PORT\"\nworkspace_env = \"PASEO_WORKTREE_PATH\"",
         );
-        assert_eq!(config.orchestrator.port_env.as_deref(), Some("PASEO_PORT"));
+        assert_eq!(config.name, "p");
     }
 
     #[test]
@@ -609,19 +590,12 @@ env_file = ".env"
 copy_files = []
 base_port = 3000
 
-[orchestrator]
-port_env = "PASEO_PORT"
-root_env = "PASEO_SOURCE_CHECKOUT_PATH"
-
 [env_template]
 VAR_A = "1"
 VAR_B = "2"
 "#;
         let override_str = r#"
 base_port = 4000
-
-[orchestrator]
-port_env = "ORCA_PORT"
 
 [env_template]
 VAR_B = "overridden"
@@ -634,11 +608,6 @@ VAR_C = "3"
         let merged: Config = base_val.try_into().unwrap();
         assert_eq!(merged.name, "base-app");
         assert_eq!(merged.base_port, Some(4000));
-        assert_eq!(merged.orchestrator.port_env.as_deref(), Some("ORCA_PORT"));
-        assert_eq!(
-            merged.orchestrator.root_env.as_deref(),
-            Some("PASEO_SOURCE_CHECKOUT_PATH")
-        );
         assert_eq!(
             merged.env_template.get("VAR_A").map(|s| s.as_str()),
             Some("1")
@@ -651,22 +620,5 @@ VAR_C = "3"
             merged.env_template.get("VAR_C").map(|s| s.as_str()),
             Some("3")
         );
-    }
-
-    #[test]
-    fn test_empty_orchestrator_not_serialized() {
-        let config = Config {
-            name: "test-app".to_string(),
-            base_port: None,
-            compose_file: None,
-            dev_command: None,
-            env_file: PathBuf::from(".env"),
-            copy_files: vec![],
-            orchestrator: OrchestratorConfig::default(),
-            services: ServicesConfig::default(),
-            env_template: BTreeMap::new(),
-        };
-        let s = toml::to_string_pretty(&config).unwrap();
-        assert!(!s.contains("[orchestrator]"));
     }
 }

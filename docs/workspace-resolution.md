@@ -1,8 +1,6 @@
 # 🔍 Workspace Resolution & Port Allocation
 
-`ai-igniter` is designed to work seamlessly in two different modes:
-1. **Standalone Mode (Zero-Config Git Worktrees):** Pure Git, no external tools or orchestrators required.
-2. **Orchestrator Mode:** Integrated with AI dev tools like **Paseo**, **Conductor**, **Orca**, or custom workspace managers.
+`ai-igniter` is designed to be **100% zero-config and harness-agnostic**. It operates using native Git inspection and deterministic port allocation, requiring zero special environment variables.
 
 This document details how `ai-igniter` determines which workspace you are in, isolates Docker containers, and allocates unique ports without collisions.
 
@@ -10,7 +8,7 @@ This document details how `ai-igniter` determines which workspace you are in, is
 
 ## 1. How Workspaces are Resolved
 
-When you run `ai-igniter dev` (or any other command), `ai-igniter` follows a strict resolution hierarchy to determine:
+When you run `ai-igniter dev` (or any other command), `ai-igniter` follows a clean hierarchy to determine:
 - **`workspace_path`**: The current worktree / directory you are working in.
 - **`root_path`**: The main repository root (used for one-time file seeding via `copy_files`).
 - **`config_path`**: The location of `ai-igniter.toml`.
@@ -21,41 +19,31 @@ flowchart TD
     B -- Yes --> C[Use --dir path]
     B -- No --> D{Inside a Git repository?}
     D -- Yes --> E[Detect worktree via git rev-parse]
-    D -- No --> F{Orchestrator Env Var set?<br/>WORKSPACE_PATH / PASEO_WORKTREE_PATH}
-    F -- Yes --> G[Use Path from Env]
-    F -- No --> H[Fallback to current directory]
-    E --> I[Find ai-igniter.toml in worktree or main checkout]
-    C --> I
-    G --> I
-    H --> I
+    D -- No --> F[Fallback to current directory]
+    E --> G[Find ai-igniter.toml in worktree or main checkout]
+    C --> G
+    F --> G
 ```
 
 ### Resolution Order
 
 1. **Explicit Flag (`--dir <PATH>`)**: Takes top priority if specified.
-2. **Native Git Inspection (Standalone Mode)**:
+2. **Native Git Inspection**:
    - `ai-igniter` runs `git rev-parse --show-toplevel` to identify the current directory or git worktree.
    - It runs `git rev-parse --git-common-dir` to identify the **main checkout** of the repository.
    - It looks for `ai-igniter.toml` inside the worktree; if not present (e.g. untracked branch), it automatically falls back to reading it from the main checkout!
-3. **Orchestrator Environment Variables**:
-   - If invoked from outside any git repository, it checks `WORKSPACE_PATH`, `PASEO_WORKTREE_PATH`, `CONDUCTOR_WORKSPACE_PATH`, or `ORCA_WORKTREE_PATH`.
+3. **Current Directory**: Fallback if running outside of any git repository.
 
 ### Root Path Resolution Order
 1. `--root <PATH>` CLI override
-2. `[orchestrator].root_env` if defined in config and present in the environment
-3. Auto-detected orchestrator environment variables: `$WORKSPACE_ROOT_PATH`, `$PASEO_SOURCE_CHECKOUT_PATH`, `$CONDUCTOR_ROOT_PATH`, `$ORCA_ROOT_PATH`
-4. Git main checkout (`git rev-parse --git-common-dir`)
-5. Fallback to `workspace_path`
+2. Git main checkout (`git rev-parse --git-common-dir`)
+3. Fallback to `workspace_path`
 
 ### Local Overrides (`ai-igniter.local.toml`)
-To support mixed teams where different developers use different tools (Paseo, Orca, Conductor) or need machine-specific port / dev command settings without dirtying git:
+To support machine-specific port or dev command settings without dirtying git:
 - `ai-igniter` automatically loads and deep-merges `ai-igniter.local.toml` (or `.ai-igniter.local.toml`) if present.
 - It checks the workspace directory first, then the root checkout directory.
 - `ai-igniter init` automatically ensures `*.local.toml` is added to `.gitignore`.
-
-### 🛡️ Anti-Hijacking Protection
-When working with AI agents or multiple terminal sessions, environment variables (like `PASEO_WORKTREE_PATH`) often leak across processes.
-`ai-igniter` **never allows environment variables to hijack a command run inside a git repository**. Local filesystem context always takes precedence.
 
 ---
 
@@ -86,29 +74,24 @@ The primary application port (`{{ports.base}}`) is resolved using the following 
 | Priority | Source | Description |
 | :--- | :--- | :--- |
 | **1** | `--port <PORT>` | Explicit CLI override |
-| **2** | `[orchestrator].port_env` | Environment variable declared in TOML (e.g., `PASEO_PORT`, `CONDUCTOR_PORT`) |
-| **3** | Auto-Detect Env Vars | `$WORKSPACE_PORT`, `$PASEO_PORT`, `$CONDUCTOR_PORT` |
-| **4** | `base_port` (in TOML) | Optional fixed port in `ai-igniter.toml` or `ai-igniter.local.toml` |
-| **5** | **Path-derived Hash** | **Default:** Deterministic port in range `20000..=59980` in steps of 20 |
+| **2** | `base_port` (in TOML) | Optional fixed port in `ai-igniter.toml` or `ai-igniter.local.toml` |
+| **3** | **Path-derived Hash** | **Default:** Deterministic port in range `20000..=59980` in steps of 20 |
 
-### Deterministic Port Derivation (Standalone Mode)
-Without any configuration or external orchestrator, `ai-igniter` takes the SHA-256 hash of your worktree's canonical path:
+> **Collision-Free Guarantee:** If the configured or derived base port is already in use by another process on your host, `ai-igniter` automatically detects it and steps forward to the next available TCP port.
+
+### Deterministic Port Derivation
+Without any configuration, `ai-igniter` takes the SHA-256 hash of your worktree's canonical path:
 ```rust
 base_port = 20000 + (hash_u16 % 2000) * 20
 ```
-- **Stable:** Running `ai-igniter dev` in the same worktree tomorrow will allocate the exact same port.
+- **Stable:** Running `ai-igniter dev` in the same worktree tomorrow will allocate the exact same port (preserving your browser cookies, local storage, and bookmarks).
 - **Spaced:** Each worktree receives a 20-port buffer (e.g., `20040` to `20059`) allowing for multiple services without overlapping with another worktree.
 
-### Service Port Offsets
-Each service declared in `ai-igniter.toml` defines a `port_offset`:
-$$\text{Service Port} = \text{Base Port} + \text{port\_offset}$$
-
-*Example with Base Port `24120`:*
-- App Port: `24120` (`ports.base`)
-- PostgreSQL (`port_offset = 1`): `24121` (`ports.postgres`)
-- Garage S3 (`port_offset = 3`): `24123` (`ports.garage`)
-- Garage Web (`web_port_offset = 4`): `24124` (`ports.garage_web`)
-- Mailpit (`port_offset = 8`): `24128` (`ports.mailpit`)
+### Service Ports (Zero-Conflict Independence)
+Each service declared in `ai-igniter.toml` defines an offset (e.g. `port_offset = 1` for Postgres, `port_offset = 3` for Garage).
+- **Preferred Port:** `base_port + port_offset`.
+- **Dynamic Conflict Avoidance:** Unlike rigid tools, if another process on your machine is squatting the exact offset port, `ai-igniter` **automatically allocates an independent free port** from the OS for that service!
+- Since services are consumed through template variables (`DATABASE_URL`, `S3_ENDPOINT`), your application connects seamlessly without any port collision errors.
 
 ---
 

@@ -324,12 +324,13 @@ pub fn spawn_background_update_checker() -> UpdateNotifierGuard {
                 .show_download_progress(false)
                 .show_output(false);
 
-            if let Ok(updater) = builder.build() {
-                if let Ok(releases) = updater.get_latest_release() {
-                    if let Some(latest) = releases.latest() {
-                        write_cache(latest.version());
-                    }
-                }
+            if let Some(latest) = builder
+                .build()
+                .ok()
+                .and_then(|u| u.get_latest_release().ok())
+                .and_then(|r| r.latest().map(|l| l.version().to_string()))
+            {
+                write_cache(&latest);
             }
         });
     }

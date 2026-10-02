@@ -2,7 +2,7 @@ use crate::cli::InitArgs;
 use crate::config::*;
 use anyhow::{Context, Result, bail};
 use colored::Colorize;
-use inquire::{Confirm, MultiSelect, Select, Text};
+use inquire::{Confirm, MultiSelect, Text};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -51,43 +51,6 @@ pub fn execute_init(args: InitArgs) -> Result<()> {
         );
     }
 
-    let orchestrator_cfg = if args.non_interactive {
-        OrchestratorConfig::default()
-    } else {
-        let mut orchestrator_options: Vec<String> =
-            vec!["Auto-detect / Multi-orchestrator (Paseo, Orca, Conductor)".to_string()];
-        orchestrator_options.extend(
-            crate::orchestrators::KNOWN_ORCHESTRATORS
-                .iter()
-                .map(|s| s.name.to_string()),
-        );
-        orchestrator_options.push("Custom (specify environment variable names)".to_string());
-        orchestrator_options.push("Generic / Fallback (WORKSPACE_*)".to_string());
-
-        let chosen = Select::new("Select orchestrator:", orchestrator_options).prompt()?;
-
-        if chosen.starts_with("Auto-detect") {
-            OrchestratorConfig::default()
-        } else if let Some(spec) = crate::orchestrators::find_by_name(&chosen) {
-            spec.to_orchestrator_config()
-        } else if chosen.starts_with("Custom") {
-            let port_var = Text::new("Port env var name:")
-                .with_initial_value("PORT")
-                .prompt()?;
-            let root_var = Text::new("Source checkout dir env var name:")
-                .with_initial_value(crate::orchestrators::GENERIC_ROOT_ENV)
-                .prompt()?;
-            OrchestratorConfig {
-                port_env: Some(port_var),
-                root_env: Some(root_var),
-            }
-        } else {
-            OrchestratorConfig {
-                port_env: Some(crate::orchestrators::GENERIC_PORT_ENV.to_string()),
-                root_env: Some(crate::orchestrators::GENERIC_ROOT_ENV.to_string()),
-            }
-        }
-    };
 
     let mut env_template = BTreeMap::new();
     let mut services = ServicesConfig::default();
@@ -162,7 +125,6 @@ pub fn execute_init(args: InitArgs) -> Result<()> {
         dev_command,
         env_file,
         copy_files: vec![],
-        orchestrator: orchestrator_cfg,
         services,
         env_template,
     };

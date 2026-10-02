@@ -318,7 +318,6 @@ mod tests {
             root.join("ai-igniter.toml"),
             config,
             Some(4300),
-            true,
         )
         .unwrap()
     }

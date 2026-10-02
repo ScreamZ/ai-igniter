@@ -4,7 +4,7 @@ mod config;
 mod context;
 mod docker;
 mod env_writer;
-mod orchestrators;
+mod ports;
 mod services;
 mod supervisor;
 
@@ -39,15 +39,6 @@ fn run(cli: Cli) -> Result<()> {
 
     let ctx = WorkspaceContext::resolve(&cli).context("Failed to resolve workspace context")?;
     ctx.print_warnings();
-
-    // If not local execution (e.g. running inside a cloud orchestrator sandbox), skip local Docker services
-    if !ctx.is_local {
-        println!(
-            "{} Running in non-local environment, skipping local Docker services.",
-            "[info]".blue().bold()
-        );
-        return Ok(());
-    }
 
     match &cli.command {
         Commands::Init(_) | Commands::Update(_) => unreachable!(),

@@ -4,19 +4,19 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(
     name = "ai-igniter",
-    about = "Lightning-fast, extensible workspace & service orchestrator for AI worktrees (Paseo, Conductor, Orca)",
+    about = "Lightning-fast, extensible workspace & service orchestrator for AI dev worktrees",
     version
 )]
 pub struct Cli {
-    /// Workspace / Worktree directory (defaults to the enclosing project, then $WORKSPACE_PATH, $PASEO_WORKTREE_PATH, $CONDUCTOR_WORKSPACE_PATH, $ORCA_WORKTREE_PATH)
+    /// Workspace / Worktree directory (defaults to current git worktree or current directory)
     #[arg(short, long, global = true)]
     pub dir: Option<PathBuf>,
 
-    /// Source checkout directory (defaults to $<orchestrator.root_env>, then the main git checkout)
+    /// Source checkout directory (defaults to the main git checkout or workspace directory)
     #[arg(short, long, global = true)]
     pub root: Option<PathBuf>,
 
-    /// Base port for services & app (defaults to $<orchestrator.port_env>, $WORKSPACE_PORT, $PASEO_PORT, $CONDUCTOR_PORT, config, or a port derived from the workspace path)
+    /// Base port for services & app (defaults to config base_port or dynamically derived from the workspace path)
     #[arg(short, long, global = true)]
     pub port: Option<u16>,
 
