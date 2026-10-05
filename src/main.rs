@@ -43,6 +43,7 @@ fn run(cli: Cli) -> Result<()> {
 
     match &cli.command {
         Commands::Init(_) | Commands::Update(_) => unreachable!(),
+        Commands::Bootstrap => commands::execute_bootstrap(&ctx),
         Commands::Dev(args) => commands::execute_dev(&ctx, args),
         Commands::Teardown => commands::execute_teardown(&ctx),
         Commands::Status => commands::execute_status(&ctx),

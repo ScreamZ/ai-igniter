@@ -87,6 +87,16 @@ impl<'a> DockerCompose<'a> {
         ])
     }
 
+    pub fn create(&self) -> Result<()> {
+        println!(
+            "{} Creating containers and volumes for project '{}' (project: {})...",
+            "[docker]".blue().bold(),
+            self.ctx.config.name,
+            self.ctx.compose_project.cyan()
+        );
+        self.run(&["create", "--no-recreate"])
+    }
+
     pub fn stop(&self) -> Result<()> {
         let _ = std::io::Write::write_fmt(
             &mut std::io::stdout(),

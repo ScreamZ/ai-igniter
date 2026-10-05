@@ -132,7 +132,17 @@ ai-igniter dev
 
 > **Tip:** When you press `Ctrl+C`, `ai-igniter` gracefully stops all associated Docker containers and child processes.
 
-### 3. Teardown when finished
+### 3. Or bootstrap without starting services
+
+If you want to create your `.env`, seed files, compose file, and Docker volumes/containers ahead of time without running the services:
+
+```bash
+ai-igniter bootstrap
+# or alias
+ai-igniter setup
+```
+
+### 4. Teardown when finished
 
 When you delete or archive a worktree, clean up all associated containers, networks, and volumes cleanly:
 
@@ -272,6 +282,7 @@ Add `ai-igniter dev` to your worktree initialization hook or launch task, and `a
 | Command | Description |
 | :--- | :--- |
 | `ai-igniter init` | Interactive wizard to initialize `ai-igniter.toml`. |
+| `ai-igniter bootstrap` *(alias: `setup`)* | Write `.env`, copy seed files, generate compose, and create Docker volumes & containers without starting. |
 | `ai-igniter dev` *(alias: `up`)* | Start services, run migrations/seeds, write `.env`, and launch dev command. |
 | `ai-igniter dev --reset` | Reset database/storage volumes to fresh state, re-seed, and start. |
 | `ai-igniter dev --no-command` | Run and supervise background Docker services without launching `dev_command`. |

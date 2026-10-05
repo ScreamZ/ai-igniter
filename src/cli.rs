@@ -33,6 +33,10 @@ pub enum Commands {
     /// Interactively initialize ai-igniter for this project (fast service selection)
     Init(InitArgs),
 
+    /// Bootstrap workspace: write .env, seed files, compose and create volumes/containers without starting
+    #[command(alias = "setup")]
+    Bootstrap,
+
     /// Start workspace services and keep them running (stops Docker when interrupted)
     #[command(alias = "up")]
     Dev(DevArgs),
