@@ -4,6 +4,7 @@ mod config;
 mod context;
 mod docker;
 mod env_writer;
+mod lock;
 mod ports;
 mod services;
 mod supervisor;

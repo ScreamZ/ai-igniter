@@ -2,12 +2,14 @@ use crate::cli::DevArgs;
 use crate::context::WorkspaceContext;
 use crate::docker::{DockerCompose, reclaim_stale_ports};
 use crate::env_writer::EnvWriter;
+use crate::lock::DevLock;
 use crate::services::get_active_services;
 use crate::supervisor::{ShutdownSignal, Supervisor};
 use anyhow::{Context, Result};
 use colored::Colorize;
 
 pub fn execute_dev(ctx: &WorkspaceContext, args: &DevArgs) -> Result<()> {
+    let _lock = DevLock::acquire(&ctx.compose_project)?;
     let shutdown = ShutdownSignal::install()?;
 
     println!(

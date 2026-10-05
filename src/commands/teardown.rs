@@ -1,5 +1,6 @@
 use crate::context::WorkspaceContext;
 use crate::docker::DockerCompose;
+use crate::lock::DevLock;
 use anyhow::{Context, Result};
 use std::fs;
 use std::io::ErrorKind;
@@ -17,5 +18,8 @@ pub fn execute_teardown(ctx: &WorkspaceContext) -> Result<()> {
             _ => {}
         }
     }
+
+    DevLock::remove(&ctx.compose_project);
+
     Ok(())
 }

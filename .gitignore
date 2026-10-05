@@ -3,4 +3,5 @@ test-workspace/
 test/
 test2
 .igniter/
+*.rlib
 
